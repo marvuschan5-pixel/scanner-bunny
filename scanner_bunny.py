@@ -29,14 +29,19 @@ BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 def download_files_from_bunny():
     """Scarica i file txt dalla cartella site/ nello storage di Bunny"""
-    headers = {"AccessKey": BUNNY_API_KEY}
+    print("Inizio download file da Bunny Storage...", flush=True)
+    headers = {"AccessKey": BUNNY_API_KEY, "Accept": "application/json"}
     site_dir = 'site'
     os.makedirs(site_dir, exist_ok=True)
     
     try:
-        response = requests.get(f"{BUNNY_STORAGE_URL}/site/", headers=headers)
+        url = f"{BUNNY_STORAGE_URL}/site/"
+        response = requests.get(url, headers=headers)
+        print(f"Richiesta lista file a {url} - Status: {response.status_code}", flush=True)
+        
         if response.status_code == 200:
             files = response.json()
+            print(f"Trovati {len(files)} elementi nella cartella site/ su Bunny.", flush=True)
             for file_info in files:
                 if not file_info.get("IsDirectory", True) and file_info.get("ObjectName", "").endswith(".txt"):
                     file_name = file_info["ObjectName"]
@@ -45,7 +50,13 @@ def download_files_from_bunny():
                     if res.status_code == 200:
                         with open(os.path.join(site_dir, file_name), "wb") as f:
                             f.write(res.content)
+                        print(f"Scaricato con successo: {file_name}", flush=True)
+                    else:
+                        print(f"Errore download {file_name}: {res.status_code}", flush=True)
+        else:
+            print(f"Errore Bunny Storage: {response.text}", flush=True)
     except Exception as e:
+        print(f"Eccezione durante il download: {str(e)}", flush=True)
         with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error downloading from Bunny Storage: {str(e)}\n")
 
@@ -55,17 +66,23 @@ def upload_file_to_bunny(local_path, remote_path):
     try:
         with open(local_path, "rb") as f:
             data = f.read()
-        requests.put(f"{BUNNY_STORAGE_URL}/{remote_path}", headers=headers, data=data)
+        url = f"{BUNNY_STORAGE_URL}/{remote_path}"
+        res = requests.put(url, headers=headers, data=data)
+        if res.status_code in [200, 201]:
+            print(f"Caricato su Bunny: {remote_path}", flush=True)
+        else:
+            print(f"Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
     except Exception as e:
+        print(f"Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
         with open(os.path.join('DIABLO-LOGV9', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
 
 def upload_results_to_bunny():
     """Carica tutta la cartella DIABLO-LOGV9 su Bunny Storage in risultati/"""
+    print("Inizio caricamento risultati su Bunny Storage...", flush=True)
     for root, _, files in os.walk(result_dir):
         for file in files:
             local_path = os.path.join(root, file)
-            # Calcola il percorso relativo per mantenere la struttura delle cartelle
             rel_path = os.path.relpath(local_path, result_dir)
             remote_path = f"risultati/{rel_path}".replace("\\", "/")
             upload_file_to_bunny(local_path, remote_path)
@@ -606,6 +623,7 @@ def main():
         
     # 2. Esegui la scansione
     if txt_files:
+        print(f"Avvio scansione su {len(txt_files)} file txt trovati...", flush=True)
         pool = multiprocessing.Pool(processes=5)
         pool.map(process_file, txt_files)
         pool.close()
@@ -613,12 +631,12 @@ def main():
         
         # 3. Carica i risultati su Bunny Storage alla fine
         upload_results_to_bunny()
-        print("Scansione terminata e risultati caricati.")
+        print("Scansione terminata e risultati caricati.", flush=True)
     else:
-        print("Nessun file txt trovato da scansionare.")
+        print("Nessun file txt trovato da scansionare.", flush=True)
         
     # 4. LOOP INFINITO: Essenziale per mantenere in vita il container su Bunny
-    print("Container in standby (Idle) per evitare il riavvio automatico...")
+    print("Container in standby (Idle) per evitare il riavvio automatico...", flush=True)
     while True:
         time.sleep(3600)  # Dorme per un'ora e ripete, tenendo il container "Ready"
 
