@@ -7,6 +7,12 @@ import string
 import random
 import ipaddress
 import socket
+import time
+
+# Gevent monkey patch DEVE essere il primissimo import prima di requests/grequests
+from gevent import monkey
+monkey.patch_all()
+
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import warnings
@@ -599,13 +605,22 @@ def main():
         return
         
     # 2. Esegui la scansione
-    pool = multiprocessing.Pool(processes=5)
-    pool.map(process_file, txt_files)
-    pool.close()
-    pool.join()
-    
-    # 3. Carica i risultati su Bunny Storage alla fine
-    upload_results_to_bunny()
+    if txt_files:
+        pool = multiprocessing.Pool(processes=5)
+        pool.map(process_file, txt_files)
+        pool.close()
+        pool.join()
+        
+        # 3. Carica i risultati su Bunny Storage alla fine
+        upload_results_to_bunny()
+        print("Scansione terminata e risultati caricati.")
+    else:
+        print("Nessun file txt trovato da scansionare.")
+        
+    # 4. LOOP INFINITO: Essenziale per mantenere in vita il container su Bunny
+    print("Container in standby (Idle) per evitare il riavvio automatico...")
+    while True:
+        time.sleep(3600)  # Dorme per un'ora e ripete, tenendo il container "Ready"
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
