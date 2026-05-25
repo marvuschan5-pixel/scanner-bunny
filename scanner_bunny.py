@@ -28,39 +28,45 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-def download_files_from_bunny():
-    """Scarica i file txt dalla cartella site/ nello storage di Bunny"""
-    print("[BUNNY DOWNLOAD] Inizio download file da Bunny Storage...", flush=True)
+def claim_next_file_from_bunny(site_dir):
+    """Scarica e 'reclama' (eliminandolo) un file txt casuale da Bunny"""
     headers = {"AccessKey": BUNNY_API_KEY, "Accept": "application/json"}
-    site_dir = 'site'
-    os.makedirs(site_dir, exist_ok=True)
-    
     try:
         url = f"{BUNNY_STORAGE_URL}/site/"
         response = requests.get(url, headers=headers)
-        print(f"[BUNNY DOWNLOAD] Richiesta lista file a {url} - Status: {response.status_code}", flush=True)
         
         if response.status_code == 200:
             files = response.json()
-            print(f"[BUNNY DOWNLOAD] Trovati {len(files)} elementi nella cartella site/ su Bunny.", flush=True)
-            for file_info in files:
-                if not file_info.get("IsDirectory", True) and file_info.get("ObjectName", "").endswith(".txt"):
-                    file_name = file_info["ObjectName"]
-                    file_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
-                    print(f"[BUNNY DOWNLOAD] Scaricamento in corso: {file_name}...", flush=True)
-                    res = requests.get(file_url, headers=headers)
-                    if res.status_code == 200:
-                        with open(os.path.join(site_dir, file_name), "wb") as f:
-                            f.write(res.content)
-                        print(f"[BUNNY DOWNLOAD] ✔️ Scaricato con successo: {file_name}", flush=True)
-                    else:
-                        print(f"[BUNNY DOWNLOAD] ❌ Errore download {file_name}: {res.status_code}", flush=True)
+            valid_files = [f for f in files if not f.get("IsDirectory", True) and f.get("ObjectName", "").endswith(".txt")]
+            
+            if not valid_files:
+                return None
+                
+            random.shuffle(valid_files) # Mescola i file per evitare collisioni tra Pod
+            
+            for file_info in valid_files:
+                file_name = file_info["ObjectName"]
+                file_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
+                
+                res = requests.get(file_url, headers=headers)
+                if res.status_code == 200:
+                    local_path = os.path.join(site_dir, file_name)
+                    with open(local_path, "wb") as f:
+                        f.write(res.content)
+                    print(f"[BUNNY CLAIM] ✔️ File scaricato: {file_name}", flush=True)
+                    
+                    # ELIMINA IMMEDIATAMENTE DA BUNNY PER EVITARE CHE ALTRI POD LO PRENDANO
+                    delete_res = requests.delete(file_url, headers={"AccessKey": BUNNY_API_KEY})
+                    if delete_res.status_code == 200:
+                        print(f"[BUNNY CLAIM] 🔒 File rimosso dalla coda remota (Reclamato): {file_name}", flush=True)
+                        
+                    return local_path
         else:
-            print(f"[BUNNY DOWNLOAD] ❌ Errore Bunny Storage: {response.text}", flush=True)
+            print(f"[BUNNY CLAIM] ❌ Errore Bunny Storage: {response.text}", flush=True)
     except Exception as e:
-        print(f"[BUNNY DOWNLOAD] ⚠️ Eccezione durante il download: {str(e)}", flush=True)
-        with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-            f.write(f"Error downloading from Bunny Storage: {str(e)}\n")
+        print(f"[BUNNY CLAIM] ⚠️ Eccezione durante il claim: {str(e)}", flush=True)
+        
+    return None
 
 def upload_file_to_bunny(local_path, remote_path):
     """Carica un file locale nello storage di Bunny"""
@@ -698,51 +704,40 @@ def process_file(file_path):
             with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
                 f.write(str(e) + '\n')
                 
-    # Alla fine della scansione di questo file, lo elimino sia in locale che su BunnyCDN
+    # Alla fine della scansione di questo file, lo elimino in locale
     print(f"\n[SCANNER] 🏁 Elaborazione terminata per: {file_name}", flush=True)
     try:
         os.remove(file_path)
         print(f"[SYSTEM] File locale eliminato: {file_path}", flush=True)
     except Exception as e:
         print(f"[SYSTEM] Errore eliminazione locale {file_path}: {e}", flush=True)
-        
-    delete_file_from_bunny(f"site/{file_name}")
 
 def main():
-    print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO...", flush=True)
+    print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
-    
-    # 1. Scarica i file da Bunny Storage prima di iniziare
-    download_files_from_bunny()
     
     site_dir = 'site'
     if not os.path.exists(site_dir):
         os.makedirs(site_dir, exist_ok=True)
         
-    txt_files = [os.path.join(site_dir, f) for f in os.listdir(site_dir) if f.endswith('.txt')]
-    
-    if not txt_files:
-        print("[SYSTEM] ⚠️ Nessun file txt trovato in site/. Termino l'esecuzione.", flush=True)
-        return
-        
-    # 2. Esegui la scansione
-    if txt_files:
-        print(f"\n[SYSTEM] 🚀 Avvio scansione sequenziale su {len(txt_files)} file txt trovati...", flush=True)
-        for txt_file in txt_files:
-            process_file(txt_file)
-        
-        # 3. Carica i risultati su Bunny Storage alla fine
-        print("\n[SYSTEM] 📦 Scansione terminata. Avvio caricamento risultati...", flush=True)
-        upload_results_to_bunny()
-        print("[SYSTEM] ✅ Scansione terminata e risultati caricati con successo.", flush=True)
-    else:
-        print("[SYSTEM] Nessun file txt trovato da scansionare.", flush=True)
-        
-    # 4. LOOP INFINITO: Essenziale per mantenere in vita il container su Bunny
-    print("\n[SYSTEM] 💤 Container in standby (Idle) per evitare il riavvio automatico...", flush=True)
     while True:
-        time.sleep(3600)  # Dorme per un'ora e ripete, tenendo il container "Ready"
+        # 1. Tenta di scaricare e reclamare un file
+        txt_file = claim_next_file_from_bunny(site_dir)
+        
+        if txt_file:
+            # 2. Esegui la scansione
+            print(f"\n[SYSTEM] 🚀 Avvio scansione sul file: {txt_file}", flush=True)
+            process_file(txt_file)
+            
+            # 3. Carica eventuali log generali su Bunny Storage
+            print("\n[SYSTEM] 📦 Scansione file terminata. Avvio caricamento risultati generali incrementali...", flush=True)
+            upload_results_to_bunny()
+            print("[SYSTEM] ✅ Risultati caricati con successo.", flush=True)
+        else:
+            # Se non ci sono file, aspetta un po' prima di riprovare (idle mode attivo)
+            print("\n[SYSTEM] 💤 Nessun file in coda su Bunny. In attesa di nuovi target...", flush=True)
+            time.sleep(60)
 
 if __name__ == '__main__':
     main()
