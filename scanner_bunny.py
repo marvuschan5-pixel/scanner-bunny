@@ -9,7 +9,6 @@ import ipaddress
 import socket
 import time
 
-# Gevent monkey patch DEVE essere il primissimo import prima di requests/grequests
 from gevent import monkey
 monkey.patch_all()
 from gevent.pool import Pool
