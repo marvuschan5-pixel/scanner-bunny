@@ -1,0 +1,4 @@
+requests==2.31.0
+grequests==0.7.0
+beautifulsoup4==4.12.3
+urllib3==2.2.1
