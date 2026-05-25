@@ -169,6 +169,22 @@ def clean_subdomain(sub, domain):
         sub = sub[4:]
     return sub
 
+def get_initial_url(url):
+    if url.startswith('http://') or url.startswith('https://'):
+        return url
+    if url.endswith(':443'):
+        return f"https://{url}"
+    if url.endswith(':80'):
+        return f"http://{url}"
+    return f"http://{url}"
+
+def get_retry_url(url):
+    if url.startswith('http://') or url.startswith('https://'):
+        return None
+    if url.endswith(':443') or url.endswith(':80'):
+        return None
+    return f"https://{url}"
+
 def reverse_ip_lookup(ip):
     url = f"https://api.hackertarget.com/reverseiplookup/?q={ip}"
     try:
@@ -252,7 +268,7 @@ def process_urls(urls_list, is_fallback=False):
         print(f"[SCANNER] Controllo blocco di {len(chunk)} URL...", flush=True)
         try:
             resp_site = [
-                grequests.get(f"http://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
+                grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in chunk
             ]
             merdb = grequests.map(resp_site)
@@ -267,11 +283,17 @@ def process_urls(urls_list, is_fallback=False):
                         }
                 if r: r.close()
                 
-            retry_urls = [chunk[i] for i, r in enumerate(merdb) if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206])]
+            retry_urls = []
+            for i, r in enumerate(merdb):
+                if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206]):
+                    retry_u = get_retry_url(chunk[i])
+                    if retry_u:
+                        retry_urls.append(retry_u)
+                        
             if retry_urls:
                 print(f"[SCANNER] Retry su {len(retry_urls)} URL in HTTPS...", flush=True)
             resp_retry = [
-                grequests.get(f"https://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
+                grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in retry_urls
             ]
             retry_responses = grequests.map(resp_retry)
@@ -580,7 +602,7 @@ def process_file(file_path):
         print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
         try:
             resp_site = [
-                grequests.get(f"http://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
+                grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in cameras
             ]
             merdb = grequests.map(resp_site)
@@ -595,11 +617,17 @@ def process_file(file_path):
                         }
                 if r: r.close()
                 
-            retry_urls = [cameras[i] for i, r in enumerate(merdb) if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206])]
+            retry_urls = []
+            for i, r in enumerate(merdb):
+                if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206]):
+                    retry_u = get_retry_url(cameras[i])
+                    if retry_u:
+                        retry_urls.append(retry_u)
+                        
             if retry_urls:
                 print(f"[SCANNER] Retry su {len(retry_urls)} host in HTTPS...", flush=True)
             resp_retry = [
-                grequests.get(f"https://{url}", timeout=3, stream=True, verify=False, allow_redirects=False)
+                grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False)
                 for url in retry_urls
             ]
             retry_responses = grequests.map(resp_retry)
@@ -641,11 +669,9 @@ def main():
         
     # 2. Esegui la scansione
     if txt_files:
-        print(f"\n[SYSTEM] 🚀 Avvio pool di scansione su {len(txt_files)} file txt trovati...", flush=True)
-        pool = multiprocessing.Pool(processes=5)
-        pool.map(process_file, txt_files)
-        pool.close()
-        pool.join()
+        print(f"\n[SYSTEM] 🚀 Avvio scansione sequenziale su {len(txt_files)} file txt trovati...", flush=True)
+        for txt_file in txt_files:
+            process_file(txt_file)
         
         # 3. Carica i risultati su Bunny Storage alla fine
         print("\n[SYSTEM] 📦 Scansione terminata. Avvio caricamento risultati...", flush=True)
@@ -660,5 +686,4 @@ def main():
         time.sleep(3600)  # Dorme per un'ora e ripete, tenendo il container "Ready"
 
 if __name__ == '__main__':
-    multiprocessing.freeze_support()
     main()
