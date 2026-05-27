@@ -25,7 +25,7 @@ from itertools import islice
 import urllib3
 
 # Configurazione Print e Output
-ENABLE_VERBOSE_PRINT = True  # Se False, stampa SOLO le vulnerabilità (livello WARNING e superiori)
+ENABLE_VERBOSE_PRINT = False  # Se False, stampa SOLO le vulnerabilità (livello WARNING e superiori)
 
 # Configurazione Logging
 log_level = logging.INFO if ENABLE_VERBOSE_PRINT else logging.WARNING
@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 # Disabilita solo i warning di connessione non sicura (SSL) senza silenziare tutto
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+# Disabilita i warning di urllib3 per header HTTP malformati (es. Content-Length e Transfer-Encoding insieme)
+logging.getLogger("urllib3").setLevel(logging.ERROR)
 
 # Costanti e Configurazioni
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
