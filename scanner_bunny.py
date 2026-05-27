@@ -25,7 +25,7 @@ from itertools import islice
 import urllib3
 
 # Configurazione Print e Output
-ENABLE_VERBOSE_PRINT = False  # Se False, stampa SOLO le vulnerabilità (livello WARNING e superiori)
+ENABLE_VERBOSE_PRINT = True  # Se False, stampa SOLO le vulnerabilità (livello WARNING e superiori)
 
 # Configurazione Logging
 log_level = logging.INFO if ENABLE_VERBOSE_PRINT else logging.WARNING
