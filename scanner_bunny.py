@@ -124,7 +124,7 @@ keyword_regexenv = config.get('APP_REGEX_ENV_SHELL', [])
 file_envscan = list(dict.fromkeys(config.get('file_env_shellscan', [])))
 file_phpprofile = list(dict.fromkeys(config.get('file_phpprofile_shellscan', [])))
 
-result_dir = 'DIABLO-LOGV9'
+result_dir = 'risultati'
 newpathtextract = os.path.join(result_dir, 'DIABLO_FILES_SPLIT')
 myfile_checktmobileprv = os.path.join(result_dir, 'DIABLO_ENV.txt')
 myfile_checktmobilephp = os.path.join(result_dir, 'DIABLO_PHPINFO.txt')
@@ -652,7 +652,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 def process_file(file_path):
     file_name = os.path.basename(file_path)
     print(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_name}", flush=True)
-    for cameras in chunked_hosts_multi(file_path, chunk_size=200):
+    for cameras in chunked_hosts_multi(file_path, chunk_size=50):
         print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
         try:
             resp_site = [
