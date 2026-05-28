@@ -84,7 +84,7 @@ def upload_file_to_bunny(local_path, remote_path):
             print(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
     except Exception as e:
         print(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
-        with open(os.path.join('DIABLO-LOGV9', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
+        with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
 
 def upload_results_to_bunny():
@@ -332,12 +332,15 @@ def process_urls(urls_list, is_fallback=False):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(100)
+            site_pool = Pool(500)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
                 jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads, is_fallback))
             site_pool.join()
+            
+            del hosts_by_site
+            del jobs
                 
         except Exception as e:
             with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
@@ -653,7 +656,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 def process_file(file_path):
     file_name = os.path.basename(file_path)
     print(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_name}", flush=True)
-    for cameras in chunked_hosts_multi(file_path, chunk_size=50):
+    for cameras in chunked_hosts_multi(file_path, chunk_size=300):
         print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
         try:
             resp_site = [
@@ -696,12 +699,16 @@ def process_file(file_path):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(100)
+            site_pool = Pool(500)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
                 jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads))
             site_pool.join()
+            
+            # Pulisco la memoria del blocco
+            del hosts_by_site
+            del jobs
                 
         except Exception as e:
             with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
@@ -723,6 +730,7 @@ def main():
     site_dir = 'site'
     if not os.path.exists(site_dir):
         os.makedirs(site_dir, exist_ok=True)
+
         
     while True:
         # 1. Tenta di scaricare e reclamare un file
