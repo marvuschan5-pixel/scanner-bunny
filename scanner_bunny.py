@@ -84,7 +84,7 @@ def upload_file_to_bunny(local_path, remote_path):
             print(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
     except Exception as e:
         print(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
-        with open(os.path.join('DIABLO-LOGV9', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
+        with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
 
 def upload_results_to_bunny():
@@ -724,12 +724,8 @@ def process_file(file_path):
 
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
-    os.makedirs(result_dir, exist_ok=True)
-    os.makedirs(newpathtextract, exist_ok=True)
     
     site_dir = 'site'
-    if not os.path.exists(site_dir):
-        os.makedirs(site_dir, exist_ok=True)
         
     while True:
         # 1. Tenta di scaricare e reclamare un file
