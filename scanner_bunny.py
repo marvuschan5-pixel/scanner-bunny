@@ -286,7 +286,7 @@ def process_urls(urls_list, is_fallback=False):
     it = iter(urls_list)
     print(f"\n[SCANNER] 🚀 Avvio scansione su {len(urls_list)} URL (fallback={is_fallback})...", flush=True)
     while True:
-        chunk = list(islice(it, 200))
+        chunk = list(islice(it, 100))
         if not chunk:
             break
         
@@ -332,7 +332,7 @@ def process_urls(urls_list, is_fallback=False):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(500)
+            site_pool = Pool(15)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
@@ -678,7 +678,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 def process_file(file_path):
     file_name = os.path.basename(file_path)
     print(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_name}", flush=True)
-    for cameras in chunked_hosts_multi(file_path, chunk_size=300):
+    for cameras in chunked_hosts_multi(file_path, chunk_size=100):
         print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
         try:
             resp_site = [
@@ -721,7 +721,7 @@ def process_file(file_path):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(500)
+            site_pool = Pool(15)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
