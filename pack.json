@@ -671,6 +671,6 @@
     "www/server/.env",
     "www/src/.env",
     "www/system/.env",
-    "www/web/.env",
+    "www/web/.env"
   ]
 }
