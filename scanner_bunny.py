@@ -25,7 +25,7 @@ from itertools import islice
 requests.packages.urllib3.disable_warnings()
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
+BUNNY_STORAGE_URL = "https://hunterx.b-cdn.net/"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 def claim_next_file_from_bunny(site_dir):
