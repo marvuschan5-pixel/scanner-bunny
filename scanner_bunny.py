@@ -49,19 +49,19 @@ def claim_next_file_from_bunny(site_dir):
                 download_url = f"https://hunterx.b-cdn.net/site/{file_name}"
                 api_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
                 
-                res = requests.get(download_url)
-                if res.status_code == 200:
-                    local_path = os.path.join(site_dir, file_name)
-                    with open(local_path, "wb") as f:
-                        f.write(res.content)
-                    print(f"[BUNNY CLAIM] ✔️ File scaricato da CDN: {file_name}", flush=True)
+                delete_res = requests.delete(api_url, headers={"AccessKey": BUNNY_API_KEY})
+                if delete_res.status_code == 200:
+                    print(f"[BUNNY CLAIM] 🔒 File reclamato atomicamente: {file_name}", flush=True)
                     
-                    # ELIMINA IMMEDIATAMENTE DA BUNNY TRAMITE LE API PER EVITARE CHE ALTRI POD LO PRENDANO
-                    delete_res = requests.delete(api_url, headers={"AccessKey": BUNNY_API_KEY})
-                    if delete_res.status_code == 200:
-                        print(f"[BUNNY CLAIM] 🔒 File rimosso dalla coda remota (Reclamato): {file_name}", flush=True)
-                        
-                    return local_path
+                    res = requests.get(download_url)
+                    if res.status_code == 200:
+                        local_path = os.path.join(site_dir, file_name)
+                        with open(local_path, "wb") as f:
+                            f.write(res.content)
+                        print(f"[BUNNY CLAIM] ✔️ File scaricato da CDN: {file_name}", flush=True)
+                        return local_path
+                    else:
+                        print(f"[BUNNY CLAIM] ⚠️ Claim riuscito ma download CDN fallito per: {file_name}", flush=True)
         else:
             print(f"[BUNNY CLAIM] ❌ Errore Bunny Storage: {response.text}", flush=True)
     except Exception as e:
@@ -375,13 +375,13 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                             fake_for_site = True
                             r.close()
                             break
-                        head = next(r.iter_content(chunk_size=100))
+                        head = content[:100]
                         if b'<html' not in head.lower() and b'<!doctype' not in head.lower() and b'<body' not in head.lower():
                             found_env_urls.append(r.url)
                         r.close()
                     except: pass
                 if r: r.close()
-            if checked >= 10 or fake_for_site: return
+            if checked >= 50 or fake_for_site: return
             
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
