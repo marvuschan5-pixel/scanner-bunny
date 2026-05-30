@@ -49,19 +49,23 @@ def claim_next_file_from_bunny(site_dir):
                 download_url = f"https://hunterx.b-cdn.net/site/{file_name}"
                 api_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
                 
-                delete_res = requests.delete(api_url, headers={"AccessKey": BUNNY_API_KEY})
-                if delete_res.status_code == 200:
-                    print(f"[BUNNY CLAIM] 🔒 File reclamato atomicamente: {file_name}", flush=True)
+                res = requests.get(download_url)
+                if res.status_code == 200:
+                    local_path = os.path.join(site_dir, file_name)
+                    with open(local_path, "wb") as f:
+                        f.write(res.content)
+                    print(f"[BUNNY CLAIM] ✔️ File scaricato da CDN: {file_name}", flush=True)
                     
-                    res = requests.get(download_url)
-                    if res.status_code == 200:
-                        local_path = os.path.join(site_dir, file_name)
-                        with open(local_path, "wb") as f:
-                            f.write(res.content)
-                        print(f"[BUNNY CLAIM] ✔️ File scaricato da CDN: {file_name}", flush=True)
+                    delete_res = requests.delete(api_url, headers={"AccessKey": BUNNY_API_KEY})
+                    if delete_res.status_code == 200:
+                        print(f"[BUNNY CLAIM] 🔒 File reclamato (DELETE OK): {file_name}", flush=True)
                         return local_path
                     else:
-                        print(f"[BUNNY CLAIM] ⚠️ Claim riuscito ma download CDN fallito per: {file_name}", flush=True)
+                        print(f"[BUNNY CLAIM] ⚠️ DELETE fallito ({delete_res.status_code}), file gia' reclamato da altro pod. Scarto: {file_name}", flush=True)
+                        try:
+                            os.remove(local_path)
+                        except:
+                            pass
         else:
             print(f"[BUNNY CLAIM] ❌ Errore Bunny Storage: {response.text}", flush=True)
     except Exception as e:
