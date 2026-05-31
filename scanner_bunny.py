@@ -351,7 +351,7 @@ def process_urls(urls_list, is_fallback=False):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(15)
+            site_pool = Pool(50)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
@@ -400,7 +400,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         r.close()
                     except: pass
                 if r: r.close()
-            if checked >= 50 or fake_for_site: return
+            if checked >= 10 or fake_for_site: return
             
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
