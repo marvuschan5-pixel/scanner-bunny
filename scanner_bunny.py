@@ -60,12 +60,12 @@ LOG_ACTIVE = True
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-DNS_WORKERS_EC2 = 100
+DNS_WORKERS_EC2 = 20
 DNS_TIMEOUT_EC2 = 3
 MAX_IPS_PER_CIDR = 25
 
 TOTAL_SLOTS = 2000
-NUM_WORKERS = 6
+NUM_WORKERS = 5
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
