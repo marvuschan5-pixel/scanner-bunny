@@ -55,7 +55,7 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
 LOG_UPLOAD_INTERVAL = 300
-LOG_ACTIVE = False
+LOG_ACTIVE = True
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
