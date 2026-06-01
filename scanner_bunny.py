@@ -50,9 +50,9 @@ BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 RANDOM_SEED = 42
-DNS_WORKERS_EC2 = 100
+DNS_WORKERS_EC2 = 200
 DNS_TIMEOUT_EC2 = 3
-HOSTNAME_CHUNK = 50
+HOSTNAME_CHUNK = 200
 MAX_IPS_PER_CIDR = 2000
 
 TOTAL_SLOTS = 5000
@@ -776,7 +776,7 @@ def url_generator(ip_pool, instance_id, total_slots):
                 with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
                     futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
                               for ip, region in chunk}
-                    for future in as_completed(futures, timeout=DNS_TIMEOUT_EC2 + 2):
+                    for future in as_completed(futures):
                         try:
                             url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
                         except Exception:
@@ -803,7 +803,7 @@ def url_generator(ip_pool, instance_id, total_slots):
             with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
                 futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
                           for ip, region in chunk}
-                for future in as_completed(futures, timeout=DNS_TIMEOUT_EC2 + 2):
+                for future in as_completed(futures):
                     try:
                         url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
                     except Exception:
