@@ -34,7 +34,7 @@ DNS_TIMEOUT_EC2 = 3
 HOSTNAME_CHUNK = 50
 MAX_IPS_PER_CIDR = 1000
 
-TOTAL_SLOTS = 10000
+TOTAL_SLOTS = 2000
 INSTANCE_ID = random.randint(0, TOTAL_SLOTS - 1)
 
 def upload_file_to_bunny(local_path, remote_path, max_retries=3):
@@ -736,9 +736,12 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
     print(f"[AWS DNS] Istanza ID={instance_id} (slot tra 0-{total_slots-1}), "
           f"~{total_for_instance:,} IP da testare via DNS (loop infinito)", flush=True)
 
+    buffer_hostnames = []
+    cycle = 0
+
     while True:
+        cycle += 1
         dns_chunk = []
-        buffer_hostnames = []
         processed = 0
         dns_total = 0
 
@@ -767,7 +770,7 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
                     batch = buffer_hostnames[:HOSTNAME_CHUNK]
                     buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
                     print(f"[AWS DNS] Batch pronto: {len(batch)} hostname "
-                          f"(processati {processed:,}/{total_for_instance:,} IP, "
+                          f"(ciclo {cycle}, processati {processed:,}/{total_for_instance:,} IP, "
                           f"hit rate {len(batch)/max(1,dns_total)*100:.1f}%)", flush=True)
                     yield batch
 
@@ -794,12 +797,8 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
             buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
             yield batch
 
-        if buffer_hostnames:
-            print(f"[AWS DNS] Ultimo batch parziale: {len(buffer_hostnames)} hostname", flush=True)
-            yield buffer_hostnames
-
-    print(f"[AWS DNS] Ciclo pool completato per istanza {instance_id}. "
-          f"Processati {processed:,} IP. Riavvio...", flush=True)
+        print(f"[AWS DNS] Ciclo #{cycle} completato. {len(buffer_hostnames)} hostname in buffer "
+              f"per prossimo ciclo, processati {processed:,} IP.", flush=True)
 
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
