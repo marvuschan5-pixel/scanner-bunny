@@ -165,14 +165,6 @@ def content_diablo_resp(req):
                 except: return str(req.text)
         except: return str(req.content)
 
-def clean_subdomain(sub, domain):
-    sub = sub.lower().strip()
-    if sub.startswith('*.'):
-        sub = sub[2:]
-    if sub.startswith('www.'):
-        sub = sub[4:]
-    return sub
-
 def get_initial_url(url):
     if url.startswith('http://') or url.startswith('https://'):
         return url
@@ -209,58 +201,6 @@ def reverse_ip_lookup(ip):
                 return aweee
     except:
         pass
-    return None
-
-def find_subdomains(domain):
-    subdomains = set()
-    try:
-        url_ht = f"https://api.hackertarget.com/hostsearch/?q={domain}"
-        res_ht = requests.get(url_ht, timeout=10)
-        if res_ht.status_code == 200 and "error" not in res_ht.text.lower():
-            lines = res_ht.text.strip().split('\n')
-            for line in lines:
-                sub = line.split(',')[0]
-                sub = clean_subdomain(sub, domain)
-                if sub.endswith(domain) and sub != domain:
-                    subdomains.add(sub)
-    except:
-        pass
-
-    try:
-        url_otx = f"https://otx.alienvault.com/api/v1/indicators/domain/{domain}/passive_dns"
-        res_otx = requests.get(url_otx, timeout=10)
-        if res_otx.status_code == 200:
-            data = res_otx.json()
-            for entry in data.get('passive_dns', []):
-                sub = entry.get('hostname', '')
-                sub = clean_subdomain(sub, domain)
-                if sub.endswith(domain) and sub != domain:
-                    subdomains.add(sub)
-    except:
-        pass
-
-    try:
-        url_crt = f"https://crt.sh/?q=%.{domain}&output=json"
-        res_crt = requests.get(url_crt, timeout=15)
-        if res_crt.status_code == 200:
-            data = res_crt.json()
-            for entry in data:
-                name = entry.get('name_value', '')
-                clean_names = name.split('\n')
-                for cn in clean_names:
-                    cn = clean_subdomain(cn, domain)
-                    if cn.endswith(domain) and cn != domain:
-                        subdomains.add(cn)
-    except:
-        pass
-
-    if subdomains:
-        aweee = []
-        for sub in sorted(subdomains):
-            if sub.startswith("www."):
-                sub = sub[4:]
-            aweee.append(sub)
-        return aweee
     return None
 
 def process_urls(urls_list, is_fallback=False):
@@ -576,32 +516,19 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 
         if found_for_site and not is_fallback:
             hostxxx = urlparse(site_link).hostname
-            if hostxxx and hostxxx.startswith("www."):
+            if not hostxxx:
+                return
+
+            if hostxxx.startswith("www."):
                 hostxxx = hostxxx[4:]
-            
-            is_ip_addr = False
+
             try:
-                ipaddress.ip_address(hostxxx)
-                is_ip_addr = True
-            except:
-                pass
-            
-            if not is_ip_addr and hostxxx:
-                parts = hostxxx.split(".")
-                if len(parts) > 2:
-                    target = ".".join(parts[-2:])
-                else:
-                    target = hostxxx
-                
-                cazzuno = find_subdomains(target)
-                if cazzuno:
-                    process_urls(cazzuno, is_fallback=True)
-                else:
-                    cazzuno = reverse_ip_lookup(hostxxx)
-                    if cazzuno:
-                        process_urls(cazzuno, is_fallback=True)
-            elif hostxxx:
-                cazzuno = reverse_ip_lookup(hostxxx)
+                target_ip = socket.gethostbyname(hostxxx)
+            except Exception:
+                target_ip = None
+
+            if target_ip:
+                cazzuno = reverse_ip_lookup(target_ip)
                 if cazzuno:
                     process_urls(cazzuno, is_fallback=True)
                 
