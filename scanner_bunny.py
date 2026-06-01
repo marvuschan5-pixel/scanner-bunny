@@ -718,11 +718,20 @@ def reverse_dns_ec2(ip, region):
     try:
         hostname, _, _ = socket.gethostbyaddr(ip)
         hostname = hostname.lower()
-        if "compute.amazonaws.com" in hostname:
-            return (ip, hostname, region)
+        if "compute.amazonaws.com" not in hostname:
+            return None
+        for port in (443, 80):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2)
+                s.connect((hostname, port))
+                s.close()
+                return (ip, hostname, region)
+            except Exception:
+                continue
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
 def instance_hostname_generator(ip_pool, instance_id, total_slots):
     total_for_instance = len(ip_pool) // total_slots
