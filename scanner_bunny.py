@@ -8,6 +8,7 @@ import random
 import ipaddress
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Gevent monkey patch DEVE essere il primissimo import prima di requests/grequests
 from gevent import monkey
@@ -19,7 +20,6 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import warnings
 import requests
 import grequests
-import multiprocessing
 from itertools import islice
 
 requests.packages.urllib3.disable_warnings()
@@ -28,50 +28,14 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-def claim_next_file_from_bunny(site_dir):
-    #"""Scarica e 'reclama' (eliminandolo) un file txt casuale da Bunny"""
-    headers = {"AccessKey": BUNNY_API_KEY, "Accept": "application/json"}
-    try:
-        url = f"{BUNNY_STORAGE_URL}/site/"
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code == 200:
-            files = response.json()
-            valid_files = [f for f in files if not f.get("IsDirectory", True) and f.get("ObjectName", "").endswith(".txt")]
-            
-            if not valid_files:
-                return None
-                
-            random.shuffle(valid_files) # Mescola i file per evitare collisioni tra Pod
-            
-            for file_info in valid_files:
-                file_name = file_info["ObjectName"]
-                download_url = f"https://hunterx.b-cdn.net/site/{file_name}"
-                api_url = f"{BUNNY_STORAGE_URL}/site/{file_name}"
-                
-                res = requests.get(download_url)
-                if res.status_code == 200:
-                    local_path = os.path.join(site_dir, file_name)
-                    with open(local_path, "wb") as f:
-                        f.write(res.content)
-                    print(f"[BUNNY CLAIM] ✔️ File scaricato da CDN: {file_name}", flush=True)
-                    
-                    delete_res = requests.delete(api_url, headers={"AccessKey": BUNNY_API_KEY})
-                    if delete_res.status_code == 200:
-                        print(f"[BUNNY CLAIM] 🔒 File reclamato (DELETE OK): {file_name}", flush=True)
-                        return local_path
-                    else:
-                        print(f"[BUNNY CLAIM] ⚠️ DELETE fallito ({delete_res.status_code}), file gia' reclamato da altro pod. Scarto: {file_name}", flush=True)
-                        try:
-                            os.remove(local_path)
-                        except:
-                            pass
-        else:
-            print(f"[BUNNY CLAIM] ❌ Errore Bunny Storage: {response.text}", flush=True)
-    except Exception as e:
-        print(f"[BUNNY CLAIM] ⚠️ Eccezione durante il claim: {str(e)}", flush=True)
-        
-    return None
+RANDOM_SEED = 42
+DNS_WORKERS_EC2 = 100
+DNS_TIMEOUT_EC2 = 3
+HOSTNAME_CHUNK = 50
+MAX_IPS_PER_CIDR = 1000
+
+TOTAL_SLOTS = 10000
+INSTANCE_ID = random.randint(0, TOTAL_SLOTS - 1)
 
 def upload_file_to_bunny(local_path, remote_path, max_retries=3):
     headers = {"AccessKey": BUNNY_API_KEY}
@@ -120,21 +84,6 @@ def upload_results_to_bunny():
             remote_path = f"risultati/DIABLO_FILES_SPLIT/{rel_path}".replace("\\", "/")
             upload_file_to_bunny(local_path, remote_path)
     print("[BUNNY UPLOAD] Caricamento DIABLO_FILES_SPLIT completato.", flush=True)
-
-def delete_file_from_bunny(remote_path):
-   # """Elimina un file dallo storage di Bunny"""
-    headers = {"AccessKey": BUNNY_API_KEY}
-    try:
-        url = f"{BUNNY_STORAGE_URL}/{remote_path}"
-        res = requests.delete(url, headers=headers)
-        if res.status_code == 200:
-            print(f"[BUNNY DELETE] 🗑️ Eliminato con successo da Bunny: {remote_path}", flush=True)
-        else:
-            print(f"[BUNNY DELETE] ❌ Errore eliminazione {remote_path}: Status {res.status_code} - {res.text}", flush=True)
-    except Exception as e:
-        print(f"[BUNNY DELETE] ⚠️ Eccezione durante l'eliminazione di {remote_path}: {str(e)}", flush=True)
-        with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-            f.write(f"Error deleting from Bunny Storage: {str(e)}\n")
 
 def load_config():
     try:
@@ -715,33 +664,181 @@ def process_file(file_path):
     except Exception as e:
         print(f"[SYSTEM] Errore eliminazione locale {file_path}: {e}", flush=True)
 
+def fetch_aws_ips():
+    url = "https://ip-ranges.amazonaws.com/ip-ranges.json"
+    print("[AWS FETCH] Scaricamento dati IP ranges da AWS...", flush=True)
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_ec2_cidrs(data):
+    cidrs = []
+    for p in data["prefixes"]:
+        if p["service"] == "EC2":
+            cidrs.append((p["ip_prefix"], p["region"]))
+    return cidrs
+
+def build_deterministic_ip_pool(cidrs_with_regions):
+    rng = random.Random(RANDOM_SEED)
+    rng.shuffle(cidrs_with_regions)
+
+    regions_set = set(r for _, r in cidrs_with_regions)
+    print(f"[AWS POOL] {len(cidrs_with_regions)} CIDR in {len(regions_set)} regioni "
+          f"(max {MAX_IPS_PER_CIDR:,} IP/CIDR, seed={RANDOM_SEED})", flush=True)
+
+    sources = []
+    for cidr, region in cidrs_with_regions:
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+            total = net.num_addresses
+            if total > MAX_IPS_PER_CIDR:
+                offsets = rng.sample(range(total), MAX_IPS_PER_CIDR)
+            else:
+                offsets = list(range(total))
+                rng.shuffle(offsets)
+            first = int(net.network_address)
+            sources.append([first, offsets, region, 0])
+        except Exception:
+            pass
+
+    result = []
+    active_indices = list(range(len(sources)))
+    rng.shuffle(active_indices)
+
+    while active_indices:
+        next_indices = []
+        for idx in active_indices:
+            first, offsets, region, pos = sources[idx]
+            if pos < len(offsets):
+                ip_int = first + offsets[pos]
+                ip = str(ipaddress.ip_address(ip_int))
+                result.append((ip, region))
+                sources[idx][3] = pos + 1
+                next_indices.append(idx)
+        active_indices = next_indices
+
+    print(f"[AWS POOL] Pool costruito: {len(result):,} IP totali, "
+          f"~{len(result) // TOTAL_SLOTS:,} per slot", flush=True)
+    return result
+
+def reverse_dns_ec2(ip, region):
+    try:
+        hostname, _, _ = socket.gethostbyaddr(ip)
+        hostname = hostname.lower()
+        if "compute.amazonaws.com" in hostname:
+            return (ip, hostname, region)
+    except Exception:
+        pass
+    return None
+
+def instance_hostname_generator(ip_pool, instance_id, total_slots):
+    total_for_instance = len(ip_pool) // total_slots
+    print(f"[AWS DNS] Istanza ID={instance_id} (slot tra 0-{total_slots-1}), "
+          f"~{total_for_instance:,} IP da testare via DNS (loop infinito)", flush=True)
+
+    while True:
+        dns_chunk = []
+        buffer_hostnames = []
+        processed = 0
+        dns_total = 0
+
+        for i, (ip, region) in enumerate(ip_pool):
+            if i % total_slots != instance_id:
+                continue
+            dns_chunk.append((ip, region))
+            processed += 1
+
+            if len(dns_chunk) >= DNS_WORKERS_EC2:
+                dns_total += len(dns_chunk)
+                with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
+                    futures = {executor.submit(reverse_dns_ec2, ip, region): (ip, region)
+                              for ip, region in dns_chunk}
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
+                        except Exception:
+                            continue
+                        if result is not None:
+                            _, hostname, _ = result
+                            buffer_hostnames.append(hostname)
+                dns_chunk = []
+
+                while len(buffer_hostnames) >= HOSTNAME_CHUNK:
+                    batch = buffer_hostnames[:HOSTNAME_CHUNK]
+                    buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
+                    print(f"[AWS DNS] Batch pronto: {len(batch)} hostname "
+                          f"(processati {processed:,}/{total_for_instance:,} IP, "
+                          f"hit rate {len(batch)/max(1,dns_total)*100:.1f}%)", flush=True)
+                    yield batch
+
+                if processed % 5000 == 0:
+                    print(f"[AWS DNS] Progresso: {processed:,} IP testati, "
+                          f"{len(buffer_hostnames)} in buffer", flush=True)
+
+        if dns_chunk:
+            dns_total += len(dns_chunk)
+            with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(dns_chunk))) as executor:
+                futures = {executor.submit(reverse_dns_ec2, ip, region): (ip, region)
+                          for ip, region in dns_chunk}
+                for future in as_completed(futures):
+                    try:
+                        result = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
+                    except Exception:
+                        continue
+                    if result is not None:
+                        _, hostname, _ = result
+                        buffer_hostnames.append(hostname)
+
+        while len(buffer_hostnames) >= HOSTNAME_CHUNK:
+            batch = buffer_hostnames[:HOSTNAME_CHUNK]
+            buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
+            yield batch
+
+        if buffer_hostnames:
+            print(f"[AWS DNS] Ultimo batch parziale: {len(buffer_hostnames)} hostname", flush=True)
+            yield buffer_hostnames
+
+    print(f"[AWS DNS] Ciclo pool completato per istanza {instance_id}. "
+          f"Processati {processed:,} IP. Riavvio...", flush=True)
+
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
-    
+
     site_dir = 'site'
     if not os.path.exists(site_dir):
         os.makedirs(site_dir, exist_ok=True)
 
-        
-    while True:
-        # 1. Tenta di scaricare e reclamare un file
-        txt_file = claim_next_file_from_bunny(site_dir)
-        
-        if txt_file:
-            # 2. Esegui la scansione
-            print(f"\n[SYSTEM] 🚀 Avvio scansione sul file: {txt_file}", flush=True)
-            process_file(txt_file)
-            
-            # 3. Carica eventuali log generali su Bunny Storage
-            print("\n[SYSTEM] 📦 Scansione file terminata. Avvio caricamento risultati generali incrementali...", flush=True)
-            upload_results_to_bunny()
-            print("[SYSTEM] ✅ Risultati caricati con successo.", flush=True)
-        else:
-            # Se non ci sono file, aspetta un po' prima di riprovare (idle mode attivo)
-            print("\n[SYSTEM] 💤 Nessun file in coda su Bunny. In attesa di nuovi target...", flush=True)
-            time.sleep(60)
+    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID} (slot tra 0-{TOTAL_SLOTS-1}) — loop infinito", flush=True)
+
+    aws_data = fetch_aws_ips()
+    ec2_cidrs = get_ec2_cidrs(aws_data)
+
+    if not ec2_cidrs:
+        print("[SYSTEM] Nessun CIDR EC2 trovato. Uscita.", flush=True)
+        return
+
+    print(f"[SYSTEM] Trovati {len(ec2_cidrs)} CIDR EC2. Costruzione pool deterministico...", flush=True)
+    ip_pool = build_deterministic_ip_pool(ec2_cidrs)
+
+    hostname_gen = instance_hostname_generator(ip_pool, INSTANCE_ID, TOTAL_SLOTS)
+    cycle = 0
+    for batch in hostname_gen:
+        cycle += 1
+        timestamp = int(time.time())
+        batch_file = os.path.join(site_dir, f'aws_ec2_{INSTANCE_ID}_{cycle}_{timestamp}.txt')
+        with open(batch_file, 'w', encoding='utf-8') as f:
+            for hostname in batch:
+                f.write(f"{hostname}\n")
+
+        print(f"\n[SYSTEM] Batch #{cycle} scritto: {os.path.basename(batch_file)} ({len(batch)} hostname)", flush=True)
+        print(f"[SYSTEM] Avvio scansione su batch EC2...", flush=True)
+        process_file(batch_file)
+
+        print("[SYSTEM] Caricamento risultati incrementali su Bunny...", flush=True)
+        upload_results_to_bunny()
+        print("[SYSTEM] Risultati caricati.", flush=True)
 
 if __name__ == '__main__':
     main()
