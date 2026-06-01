@@ -60,9 +60,9 @@ LOG_ACTIVE = True
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-DNS_WORKERS_EC2 = 100
+DNS_WORKERS_EC2 = 300
 DNS_TIMEOUT_EC2 = 3
-MAX_IPS_PER_CIDR = 12000
+MAX_IPS_PER_CIDR = 400
 
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 5
@@ -745,21 +745,25 @@ def verify_ec2_webserver(ip, region):
     except Exception:
         return None
 
-def gather_urls_cycle(cidr_pool, instance_id, total_slots, cycle_num):
+def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
     total_cidrs = len(cidr_pool)
     seen_urls = set()
     all_ips = []
 
     for first, total, region in cidr_pool:
         n_sample = min(total, MAX_IPS_PER_CIDR)
-        offsets = random.sample(range(total), n_sample) if n_sample < total else list(range(total))
+        rng = random.Random(first + instance_id * 7919)
+        if n_sample >= total:
+            offsets = list(range(total))
+            rng.shuffle(offsets)
+        else:
+            offsets = rng.sample(range(total), n_sample)
         for off in offsets:
-            ip_int = first + off
-            if ip_int % total_slots == instance_id:
-                all_ips.append((str(ipaddress.ip_address(ip_int)), region))
+            all_ips.append((str(ipaddress.ip_address(first + off)), region))
 
     random.shuffle(all_ips)
-    print(f"[AWS GATHER #{cycle_num}] {len(all_ips):,} IP campionati. "
+    print(f"[AWS GATHER #{cycle_num}] {len(all_ips):,} IP campionati "
+          f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}). "
           f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
 
     chunk = []
@@ -797,7 +801,7 @@ def gather_urls_cycle(cidr_pool, instance_id, total_slots, cycle_num):
 
     urls = list(seen_urls)
     random.shuffle(urls)
-    print(f"[AWS GATHER #{cycle_num}] Fase 1 completata: {hits} URL web server verificati "
+    print(f"[AWS GATHER #{cycle_num}] Completato: {hits} URL web server verificati "
           f"su {len(all_ips):,} IP analizzati.", flush=True)
     return urls
 
@@ -816,7 +820,8 @@ def main():
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
 
-    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID} (slot 0-{TOTAL_SLOTS-1}) — loop infinito", flush=True)
+    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID}, {NUM_WORKERS} worker, "
+          f"~{MAX_IPS_PER_CIDR} IP/CIDR — loop infinito", flush=True)
 
     aws_data = fetch_aws_ips()
     ec2_cidrs = get_ec2_cidrs(aws_data)
@@ -828,10 +833,7 @@ def main():
     print(f"[SYSTEM] Trovati {len(ec2_cidrs)} CIDR EC2. Costruzione pool CIDR...", flush=True)
     cidr_pool = build_cidr_pool(ec2_cidrs)
 
-    expanded_slots = TOTAL_SLOTS * NUM_WORKERS
-    print(f"[SYSTEM] Avvio {NUM_WORKERS} worker thread "
-          f"(slot 0-{expanded_slots-1})",
-          flush=True)
+    print(f"[SYSTEM] Avvio {NUM_WORKERS} worker thread (loop infinito)", flush=True)
 
     def worker_loop(worker_id):
         my_id = INSTANCE_ID * NUM_WORKERS + worker_id
@@ -839,7 +841,7 @@ def main():
         w_last_upload = time.time()
         while True:
             cycle += 1
-            urls = gather_urls_cycle(cidr_pool, my_id, expanded_slots, cycle)
+            urls = gather_urls_cycle(cidr_pool, my_id, cycle)
             if urls:
                 print(f"\n[W{worker_id}] Fase 2 — Scansione di {len(urls)} URL verificati...", flush=True)
                 process_urls(urls)
