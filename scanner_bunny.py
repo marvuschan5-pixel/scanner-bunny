@@ -60,7 +60,7 @@ LOG_ACTIVE = True
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-DNS_WORKERS_EC2 = 40
+DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
 MAX_IPS_PER_CIDR = 25
 
