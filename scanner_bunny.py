@@ -302,7 +302,9 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         r.close()
                     except: pass
                 if r: r.close()
-            if checked >= 10 or fake_for_site: return
+            if checked >= 10:
+                fake_for_site = True
+            if fake_for_site: break
             
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
@@ -313,7 +315,9 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     checkeds += 1
                     found_php_urls.append(r.url)
                 if r: r.close()
-            if checkeds >= 10: return
+            if checkeds >= 10:
+                fake_for_site = True
+                break
             
         urls_to_analyze = found_env_urls + found_php_urls
         if not urls_to_analyze: return
@@ -590,14 +594,19 @@ def gather_and_scan_cycle(cidr_pool, worker_id, num_workers, cycle_num):
     all_ips = []
 
     for first, total, region in cidr_pool:
-        n_sample = min(total, MAX_IPS_PER_CIDR)
-        rng = random.Random(first + INSTANCE_ID * 7919)
-        if n_sample >= total:
-            offsets = list(range(total))
-            rng.shuffle(offsets)
+        rem = (INSTANCE_ID - (first % TOTAL_SLOTS)) % TOTAL_SLOTS
+        if rem >= total:
+            continue
+
+        offsets_pool = list(range(rem, total, TOTAL_SLOTS))
+        rng = random.Random(first * 7919 + cycle_num * 104729)
+        n_take = min(len(offsets_pool), MAX_IPS_PER_CIDR)
+        if n_take >= len(offsets_pool):
+            chosen = offsets_pool
         else:
-            offsets = rng.sample(range(total), n_sample)
-        for off in offsets:
+            chosen = rng.sample(offsets_pool, n_take)
+
+        for off in chosen:
             all_ips.append((str(ipaddress.ip_address(first + off)), region))
 
     random.shuffle(all_ips)
@@ -606,12 +615,12 @@ def gather_and_scan_cycle(cidr_pool, worker_id, num_workers, cycle_num):
     random.shuffle(my_ips)
     total_my = len(my_ips)
 
-    total_pool = len(all_ips)
+    total_container = len(all_ips)
     if worker_id == 0:
-        print(f"[AWS GATHER #{cycle_num}] Container-ID={INSTANCE_ID}, "
-              f"{total_pool:,} IP campionati "
+        print(f"[AWS GATHER #{cycle_num}] Shard {INSTANCE_ID}/{TOTAL_SLOTS}, "
+              f"{total_container:,} IP esclusivi "
               f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}), "
-              f"divisi tra {num_workers} worker (~{total_pool // num_workers:,} ciascuno). "
+              f"divisi tra {num_workers} worker (~{total_container // num_workers:,} ciascuno). "
               f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
 
     chunk = []
