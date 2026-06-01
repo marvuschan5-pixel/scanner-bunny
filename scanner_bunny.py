@@ -29,10 +29,19 @@ class TeeLogger:
     def __init__(self, filepath):
         self.terminal = sys.stdout
         self.logfile = open(filepath, 'a', encoding='utf-8')
+        self.at_newline = True
+
+    def _ts(self):
+        return time.strftime('%H:%M:%S', time.localtime())
 
     def write(self, message):
+        if message and self.at_newline and not message.startswith('\r'):
+            ts = f"[{self._ts()}] "
+            self.terminal.write(ts)
+            self.logfile.write(ts)
         self.terminal.write(message)
         self.logfile.write(message)
+        self.at_newline = message.endswith('\n')
 
     def flush(self):
         self.terminal.flush()
@@ -52,7 +61,7 @@ BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 RANDOM_SEED = 42
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-HOSTNAME_CHUNK = 100
+HOSTNAME_CHUNK = 500
 MAX_IPS_PER_CIDR = 10000
 
 TOTAL_SLOTS = 10000
