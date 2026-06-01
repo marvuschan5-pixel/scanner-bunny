@@ -32,10 +32,13 @@ RANDOM_SEED = 42
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
 HOSTNAME_CHUNK = 50
-MAX_IPS_PER_CIDR = 1000
+MAX_IPS_PER_CIDR = 2000
 
-TOTAL_SLOTS = 2000
-INSTANCE_ID = random.randint(0, TOTAL_SLOTS - 1)
+TOTAL_SLOTS = 50000
+
+_CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
+_SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
+INSTANCE_ID = _SLOT_HASH % TOTAL_SLOTS
 
 def upload_file_to_bunny(local_path, remote_path, max_retries=3):
     headers = {"AccessKey": BUNNY_API_KEY}
