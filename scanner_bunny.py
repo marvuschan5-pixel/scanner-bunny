@@ -714,100 +714,97 @@ def build_deterministic_ip_pool(cidrs_with_regions):
           f"~{len(result) // TOTAL_SLOTS:,} per slot", flush=True)
     return result
 
-def reverse_dns_ec2(ip, region):
+def verify_ec2_webserver(ip, region):
     try:
         hostname, _, _ = socket.gethostbyaddr(ip)
         hostname = hostname.lower()
-        if "compute.amazonaws.com" in hostname:
-            return (ip, hostname, region)
+        if "compute.amazonaws.com" not in hostname:
+            return None
+        for port, proto in [(443, "https"), (80, "http")]:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2)
+                s.connect((hostname, port))
+                s.close()
+                return f"{proto}://{hostname}"
+            except Exception:
+                continue
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
-def instance_hostname_generator(ip_pool, instance_id, total_slots):
+def url_generator(ip_pool, instance_id, total_slots):
     total_for_instance = len(ip_pool) // total_slots
-    print(f"[AWS DNS] Istanza ID={instance_id} (slot tra 0-{total_slots-1}), "
-          f"~{total_for_instance:,} IP da testare via DNS (loop infinito)", flush=True)
+    print(f"[AWS SCAN] Istanza ID={instance_id} (slot 0-{total_slots-1}), "
+          f"~{total_for_instance:,} IP da verificare (loop infinito)", flush=True)
 
-    buffer_hostnames = []
-    seen_hostnames = set()
+    buffer_urls = []
+    seen_urls = set()
     cycle = 0
 
     while True:
         cycle += 1
-        dns_chunk = []
+        chunk = []
         processed = 0
-        dns_total = 0
 
         for i, (ip, region) in enumerate(ip_pool):
             if i % total_slots != instance_id:
                 continue
-            dns_chunk.append((ip, region))
+            chunk.append((ip, region))
             processed += 1
 
-            if len(dns_chunk) >= DNS_WORKERS_EC2:
-                dns_total += len(dns_chunk)
+            if len(chunk) >= DNS_WORKERS_EC2:
                 with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
-                    futures = {executor.submit(reverse_dns_ec2, ip, region): (ip, region)
-                              for ip, region in dns_chunk}
+                    futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
+                              for ip, region in chunk}
                     for future in as_completed(futures):
                         try:
-                            result = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
+                            url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
                         except Exception:
                             continue
-                        if result is not None:
-                            _, hostname, _ = result
-                            if hostname not in seen_hostnames:
-                                seen_hostnames.add(hostname)
-                                buffer_hostnames.append(hostname)
-                dns_chunk = []
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            buffer_urls.append(url)
+                chunk = []
 
-                while len(buffer_hostnames) >= HOSTNAME_CHUNK:
-                    batch = buffer_hostnames[:HOSTNAME_CHUNK]
-                    buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
-                    print(f"[AWS DNS] Batch pronto: {len(batch)} hostname "
-                          f"(ciclo {cycle}, processati {processed:,}/{total_for_instance:,} IP, "
-                          f"hit rate {len(batch)/max(1,dns_total)*100:.1f}%)", flush=True)
+                while len(buffer_urls) >= HOSTNAME_CHUNK:
+                    batch = buffer_urls[:HOSTNAME_CHUNK]
+                    buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
+                    print(f"[AWS SCAN] Batch pronto: {len(batch)} URL verificati "
+                          f"(ciclo {cycle}, processati {processed:,}/{total_for_instance:,} IP)", flush=True)
                     yield batch
 
                 if processed % 5000 == 0:
-                    print(f"[AWS DNS] Progresso: {processed:,} IP testati, "
-                          f"{len(buffer_hostnames)} in buffer", flush=True)
+                    print(f"[AWS SCAN] Progresso: {processed:,} IP verificati, "
+                          f"{len(buffer_urls)} URL in buffer", flush=True)
 
-        if dns_chunk:
-            dns_total += len(dns_chunk)
-            with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(dns_chunk))) as executor:
-                futures = {executor.submit(reverse_dns_ec2, ip, region): (ip, region)
-                          for ip, region in dns_chunk}
+        if chunk:
+            with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
+                futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
+                          for ip, region in chunk}
                 for future in as_completed(futures):
                     try:
-                        result = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
+                        url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
                     except Exception:
                         continue
-                    if result is not None:
-                        _, hostname, _ = result
-                        if hostname not in seen_hostnames:
-                            seen_hostnames.add(hostname)
-                            buffer_hostnames.append(hostname)
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        buffer_urls.append(url)
 
-        while len(buffer_hostnames) >= HOSTNAME_CHUNK:
-            batch = buffer_hostnames[:HOSTNAME_CHUNK]
-            buffer_hostnames = buffer_hostnames[HOSTNAME_CHUNK:]
+        while len(buffer_urls) >= HOSTNAME_CHUNK:
+            batch = buffer_urls[:HOSTNAME_CHUNK]
+            buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
             yield batch
 
-        print(f"[AWS DNS] Ciclo #{cycle} completato. {len(buffer_hostnames)} hostname in buffer "
-              f"per prossimo ciclo, processati {processed:,} IP.", flush=True)
+        print(f"[AWS SCAN] Ciclo #{cycle} completato. {len(buffer_urls)} URL in buffer, "
+              f"processati {processed:,} IP.", flush=True)
 
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
 
-    site_dir = 'site'
-    if not os.path.exists(site_dir):
-        os.makedirs(site_dir, exist_ok=True)
-
-    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID} (slot tra 0-{TOTAL_SLOTS-1}) — loop infinito", flush=True)
+    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID} (slot 0-{TOTAL_SLOTS-1}) — loop infinito", flush=True)
 
     aws_data = fetch_aws_ips()
     ec2_cidrs = get_ec2_cidrs(aws_data)
@@ -819,19 +816,13 @@ def main():
     print(f"[SYSTEM] Trovati {len(ec2_cidrs)} CIDR EC2. Costruzione pool deterministico...", flush=True)
     ip_pool = build_deterministic_ip_pool(ec2_cidrs)
 
-    hostname_gen = instance_hostname_generator(ip_pool, INSTANCE_ID, TOTAL_SLOTS)
-    cycle = 0
-    for batch in hostname_gen:
-        cycle += 1
-        timestamp = int(time.time())
-        batch_file = os.path.join(site_dir, f'aws_ec2_{INSTANCE_ID}_{cycle}_{timestamp}.txt')
-        with open(batch_file, 'w', encoding='utf-8') as f:
-            for hostname in batch:
-                f.write(f"{hostname}\n")
-
-        print(f"\n[SYSTEM] Batch #{cycle} scritto: {os.path.basename(batch_file)} ({len(batch)} hostname)", flush=True)
-        print(f"[SYSTEM] Avvio scansione su batch EC2...", flush=True)
-        process_file(batch_file)
+    gen = url_generator(ip_pool, INSTANCE_ID, TOTAL_SLOTS)
+    batch_num = 0
+    for batch in gen:
+        batch_num += 1
+        print(f"\n[SYSTEM] Batch #{batch_num}: {len(batch)} URL verificati → scansione diretta", flush=True)
+        process_urls(batch)
+        print(f"[SYSTEM] Batch #{batch_num} completato.", flush=True)
 
 if __name__ == '__main__':
     main()
