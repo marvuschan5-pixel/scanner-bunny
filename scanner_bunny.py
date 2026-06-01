@@ -78,16 +78,6 @@ def upload_file_to_bunny(local_path, remote_path, max_retries=3):
             f.write(f"Error uploading to Bunny Storage ({remote_path}): {last_error}\n")
     return False
 
-def upload_results_to_bunny():
-    print("[BUNNY UPLOAD] Inizio caricamento cartella DIABLO_FILES_SPLIT su Bunny Storage...", flush=True)
-    for root, _, files in os.walk(newpathtextract):
-        for file in files:
-            local_path = os.path.join(root, file)
-            rel_path = os.path.relpath(local_path, newpathtextract)
-            remote_path = f"risultati/DIABLO_FILES_SPLIT/{rel_path}".replace("\\", "/")
-            upload_file_to_bunny(local_path, remote_path)
-    print("[BUNNY UPLOAD] Caricamento DIABLO_FILES_SPLIT completato.", flush=True)
-
 def load_config():
     try:
         with open('pack.json', 'r', encoding='utf-8') as f:
@@ -837,10 +827,6 @@ def main():
         print(f"\n[SYSTEM] Batch #{cycle} scritto: {os.path.basename(batch_file)} ({len(batch)} hostname)", flush=True)
         print(f"[SYSTEM] Avvio scansione su batch EC2...", flush=True)
         process_file(batch_file)
-
-        print("[SYSTEM] Caricamento risultati incrementali su Bunny...", flush=True)
-        upload_results_to_bunny()
-        print("[SYSTEM] Risultati caricati.", flush=True)
 
 if __name__ == '__main__':
     main()
