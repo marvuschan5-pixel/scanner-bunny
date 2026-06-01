@@ -34,7 +34,7 @@ DNS_TIMEOUT_EC2 = 3
 HOSTNAME_CHUNK = 50
 MAX_IPS_PER_CIDR = 2000
 
-TOTAL_SLOTS = 50000
+TOTAL_SLOTS = 5000
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
@@ -718,20 +718,11 @@ def reverse_dns_ec2(ip, region):
     try:
         hostname, _, _ = socket.gethostbyaddr(ip)
         hostname = hostname.lower()
-        if "compute.amazonaws.com" not in hostname:
-            return None
-        for port in (443, 80):
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(2)
-                s.connect((hostname, port))
-                s.close()
-                return (ip, hostname, region)
-            except Exception:
-                continue
-        return None
+        if "compute.amazonaws.com" in hostname:
+            return (ip, hostname, region)
     except Exception:
-        return None
+        pass
+    return None
 
 def instance_hostname_generator(ip_pool, instance_id, total_slots):
     total_for_instance = len(ip_pool) // total_slots
