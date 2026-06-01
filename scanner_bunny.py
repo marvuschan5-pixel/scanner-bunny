@@ -757,7 +757,6 @@ def url_generator(ip_pool, instance_id, total_slots):
           f"~{total_for_instance:,} IP da risolvere (loop infinito)", flush=True)
 
     buffer_urls = []
-    seen_urls = set()
     cycle = 0
 
     while True:
@@ -765,6 +764,7 @@ def url_generator(ip_pool, instance_id, total_slots):
         chunk = []
         processed = 0
         cycle_hits = 0
+        seen_urls = set()
 
         for i, (ip, region) in enumerate(ip_pool):
             if i % total_slots != instance_id:
