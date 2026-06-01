@@ -61,11 +61,11 @@ BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 100
-DNS_TIMEOUT_EC2 = 2
+DNS_TIMEOUT_EC2 = 3
 MAX_IPS_PER_CIDR = 5
 
 TOTAL_SLOTS = 2000
-NUM_WORKERS = 10
+NUM_WORKERS = 5
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
@@ -657,14 +657,14 @@ def verify_ec2_webserver(ip, region):
     except Exception:
         return None
 
-def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
+def gather_and_scan_cycle(cidr_pool, worker_id, num_workers, cycle_num):
     total_cidrs = len(cidr_pool)
     seen_urls = set()
     all_ips = []
 
     for first, total, region in cidr_pool:
         n_sample = min(total, MAX_IPS_PER_CIDR)
-        rng = random.Random(first + instance_id * 7919)
+        rng = random.Random(first * 7919)
         if n_sample >= total:
             offsets = list(range(total))
             rng.shuffle(offsets)
@@ -674,17 +674,24 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
             all_ips.append((str(ipaddress.ip_address(first + off)), region))
 
     random.shuffle(all_ips)
-    total_ips = len(all_ips)
-    print(f"[AWS GATHER #{cycle_num}] {total_ips:,} IP campionati "
-          f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}). "
-          f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
+
+    my_ips = [(ip, region) for i, (ip, region) in enumerate(all_ips) if i % num_workers == worker_id]
+    random.shuffle(my_ips)
+    total_my = len(my_ips)
+
+    total_pool = len(all_ips)
+    if worker_id == 0:
+        print(f"[AWS GATHER #{cycle_num}] {total_pool:,} IP campionati "
+              f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}), "
+              f"divisi tra {num_workers} worker (~{total_pool // num_workers:,} ciascuno). "
+              f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
 
     chunk = []
     hits = 0
     processed = 0
     last_pct = -1
 
-    for ip, region in all_ips:
+    for ip, region in my_ips:
         chunk.append((ip, region))
 
         if len(chunk) >= DNS_WORKERS_EC2:
@@ -702,11 +709,11 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
                         seen_urls.add(url)
                         hits += 1
 
-            pct = processed * 100 // total_ips
+            pct = processed * 100 // total_my
             if pct >= last_pct + 10:
                 last_pct = pct - (pct % 10)
                 bad = processed - hits
-                print(f"[AWS GATHER #{cycle_num}] {pct}% ({processed:,}/{total_ips:,}) "
+                print(f"[W{worker_id} GATHER #{cycle_num}] {pct}% ({processed:,}/{total_my:,}) "
                       f"— {hits} webserver, {bad} scartati", flush=True)
 
             chunk = []
@@ -729,9 +736,15 @@ def gather_urls_cycle(cidr_pool, instance_id, cycle_num):
     urls = list(seen_urls)
     random.shuffle(urls)
     bad = processed - hits
-    print(f"[AWS GATHER #{cycle_num}] Completato: {hits} web server, {bad} scartati "
-          f"su {total_ips:,} IP analizzati.", flush=True)
-    return urls
+    print(f"[W{worker_id} GATHER #{cycle_num}] Fase 1: {hits} web server, {bad} scartati "
+          f"su {total_my:,} IP.", flush=True)
+
+    if urls:
+        print(f"[W{worker_id}] Fase 2 — Scansione di {len(urls)} URL verificati...", flush=True)
+        process_urls(urls)
+        print(f"[W{worker_id}] Fase 2 completata.", flush=True)
+    else:
+        print(f"[W{worker_id}] Nessun URL trovato. Salto scansione.", flush=True)
 
 def main():
     global LOG_PATH
@@ -764,18 +777,12 @@ def main():
     print(f"[SYSTEM] Avvio {NUM_WORKERS} worker thread (loop infinito)", flush=True)
 
     def worker_loop(worker_id):
-        my_id = INSTANCE_ID * NUM_WORKERS + worker_id
         cycle = 0
         w_last_upload = time.time()
         while True:
             cycle += 1
-            urls = gather_urls_cycle(cidr_pool, my_id, cycle)
-            if urls:
-                print(f"\n[W{worker_id}] Fase 2 — Scansione di {len(urls)} URL verificati...", flush=True)
-                process_urls(urls)
-                print(f"[W{worker_id}] Fase 2 completata. Nuovo ciclo...", flush=True)
-            else:
-                print(f"[W{worker_id}] Nessun URL trovato in questo ciclo.", flush=True)
+            gather_and_scan_cycle(cidr_pool, worker_id, NUM_WORKERS, cycle)
+            print(f"[W{worker_id}] Ciclo #{cycle} completato.", flush=True)
             if time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
                 print(f"[W{worker_id}] Upload log...", flush=True)
                 try:
