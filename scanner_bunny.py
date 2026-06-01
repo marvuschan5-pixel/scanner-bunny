@@ -9,6 +9,7 @@ import ipaddress
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Thread
 
 # Gevent monkey patch DEVE essere il primissimo import prima di requests/grequests
 from gevent import monkey
@@ -54,17 +55,18 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
 LOG_UPLOAD_INTERVAL = 300
+LOG_ACTIVE = False
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
-RANDOM_SEED = 42
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-HOSTNAME_CHUNK = 500
-MAX_IPS_PER_CIDR = 500
+HOSTNAME_CHUNK = 50
+MAX_IPS_PER_CIDR = 12000
 
-TOTAL_SLOTS = 10000
+TOTAL_SLOTS = 2000
+NUM_WORKERS = 5
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
@@ -109,6 +111,8 @@ def upload_file_to_bunny(local_path, remote_path, max_retries=3):
     return False
 
 def upload_log_to_bunny():
+    if not LOG_ACTIVE:
+        return
     if not LOG_PATH or not os.path.exists(LOG_PATH):
         return
     remote = f"logs/{os.path.basename(LOG_PATH)}"
@@ -707,48 +711,21 @@ def get_ec2_cidrs(data):
             cidrs.append((p["ip_prefix"], p["region"]))
     return cidrs
 
-def build_deterministic_ip_pool(cidrs_with_regions):
-    rng = random.Random(RANDOM_SEED)
-    rng.shuffle(cidrs_with_regions)
-
-    regions_set = set(r for _, r in cidrs_with_regions)
-    print(f"[AWS POOL] {len(cidrs_with_regions)} CIDR in {len(regions_set)} regioni "
-          f"(max {MAX_IPS_PER_CIDR:,} IP/CIDR, seed={RANDOM_SEED})", flush=True)
-
+def build_cidr_pool(cidrs_with_regions):
     sources = []
     for cidr, region in cidrs_with_regions:
         try:
             net = ipaddress.ip_network(cidr, strict=False)
             total = net.num_addresses
-            if total > MAX_IPS_PER_CIDR:
-                offsets = rng.sample(range(total), MAX_IPS_PER_CIDR)
-            else:
-                offsets = list(range(total))
-                rng.shuffle(offsets)
             first = int(net.network_address)
-            sources.append([first, offsets, region, 0])
+            sources.append((first, total, region))
         except Exception:
             pass
 
-    result = []
-    active_indices = list(range(len(sources)))
-    rng.shuffle(active_indices)
-
-    while active_indices:
-        next_indices = []
-        for idx in active_indices:
-            first, offsets, region, pos = sources[idx]
-            if pos < len(offsets):
-                ip_int = first + offsets[pos]
-                ip = str(ipaddress.ip_address(ip_int))
-                result.append((ip, region))
-                sources[idx][3] = pos + 1
-                next_indices.append(idx)
-        active_indices = next_indices
-
-    print(f"[AWS POOL] Pool costruito: {len(result):,} IP totali, "
-          f"~{len(result) // TOTAL_SLOTS:,} per slot", flush=True)
-    return result
+    regions_set = set(r for _, _, r in sources)
+    print(f"[AWS POOL] {len(sources)} CIDR in {len(regions_set)} regioni "
+          f"(max {MAX_IPS_PER_CIDR:,} IP/CIDR, sample casuale ogni ciclo)", flush=True)
+    return sources
 
 def resolve_ec2_url(ip, region):
     try:
@@ -760,24 +737,35 @@ def resolve_ec2_url(ip, region):
         pass
     return None
 
-def url_generator(ip_pool, instance_id, total_slots):
-    total_for_instance = len(ip_pool) // total_slots
+def url_generator(cidr_pool, instance_id, total_slots):
+    total_cidrs = len(cidr_pool)
     print(f"[AWS SCAN] Istanza ID={instance_id} (slot 0-{total_slots-1}), "
-          f"~{total_for_instance:,} IP da risolvere (loop infinito)", flush=True)
+          f"{total_cidrs} CIDR, IP casuali ogni ciclo (loop infinito)", flush=True)
 
     buffer_urls = []
     cycle = 0
 
     while True:
         cycle += 1
+        seen_urls = set()
+        all_ips = []
+
+        for first, total, region in cidr_pool:
+            n_sample = min(total, MAX_IPS_PER_CIDR)
+            offsets = random.sample(range(total), n_sample) if n_sample < total else list(range(total))
+            for off in offsets:
+                ip_int = first + off
+                if ip_int % total_slots == instance_id:
+                    all_ips.append((str(ipaddress.ip_address(ip_int)), region))
+
+        random.shuffle(all_ips)
+        print(f"[AWS SCAN] Ciclo #{cycle}: {len(all_ips):,} IP campionati da {total_cidrs} CIDR", flush=True)
+
         chunk = []
         processed = 0
         cycle_hits = 0
-        seen_urls = set()
 
-        for i, (ip, region) in enumerate(ip_pool):
-            if i % total_slots != instance_id:
-                continue
+        for ip, region in all_ips:
             chunk.append((ip, region))
             processed += 1
 
@@ -800,13 +788,8 @@ def url_generator(ip_pool, instance_id, total_slots):
                     batch = buffer_urls[:HOSTNAME_CHUNK]
                     buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
                     print(f"[AWS SCAN] Batch pronto: {len(batch)} URL (ciclo {cycle}, "
-                          f"processati {processed:,}/{total_for_instance:,} IP, "
-                          f"hit {cycle_hits} in questo ciclo)", flush=True)
+                          f"processati {processed:,} IP, hit {cycle_hits})", flush=True)
                     yield batch
-
-                if processed % 5000 == 0:
-                    print(f"[AWS SCAN] Progresso: {processed:,} IP risolti, "
-                          f"{len(buffer_urls)} URL in buffer", flush=True)
 
         if chunk:
             with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
@@ -833,13 +816,15 @@ def url_generator(ip_pool, instance_id, total_slots):
 def main():
     global LOG_PATH
 
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    container_id = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
-    LOG_PATH = os.path.join(LOGS_DIR, f'{container_id}.log')
-    sys.stdout = TeeLogger(LOG_PATH)
+    if LOG_ACTIVE:
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        container_id = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
+        LOG_PATH = os.path.join(LOGS_DIR, f'{container_id}.log')
+        sys.stdout = TeeLogger(LOG_PATH)
 
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
-    print(f"[SYSTEM] Log salvato in: {LOG_PATH}", flush=True)
+    if LOG_ACTIVE:
+        print(f"[SYSTEM] Log salvato in: {LOG_PATH}", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
 
@@ -852,22 +837,43 @@ def main():
         print("[SYSTEM] Nessun CIDR EC2 trovato. Uscita.", flush=True)
         return
 
-    print(f"[SYSTEM] Trovati {len(ec2_cidrs)} CIDR EC2. Costruzione pool deterministico...", flush=True)
-    ip_pool = build_deterministic_ip_pool(ec2_cidrs)
+    print(f"[SYSTEM] Trovati {len(ec2_cidrs)} CIDR EC2. Costruzione pool CIDR...", flush=True)
+    cidr_pool = build_cidr_pool(ec2_cidrs)
 
-    gen = url_generator(ip_pool, INSTANCE_ID, TOTAL_SLOTS)
-    batch_num = 0
-    last_log_upload = time.time()
-    for batch in gen:
-        batch_num += 1
-        print(f"\n[SYSTEM] Batch #{batch_num}: {len(batch)} URL verificati → scansione diretta", flush=True)
-        process_urls(batch)
-        print(f"[SYSTEM] Batch #{batch_num} completato.", flush=True)
+    expanded_slots = TOTAL_SLOTS * NUM_WORKERS
+    print(f"[SYSTEM] Avvio {NUM_WORKERS} worker thread "
+          f"(slot 0-{expanded_slots-1}, {INSTANCE_ID}×{NUM_WORKERS}=W{INSTANCE_ID*NUM_WORKERS}-W{INSTANCE_ID*NUM_WORKERS+NUM_WORKERS-1})",
+          flush=True)
 
-        if time.time() - last_log_upload > LOG_UPLOAD_INTERVAL:
-            print("[SYSTEM] Upload log su Bunny Storage...", flush=True)
-            upload_log_to_bunny()
-            last_log_upload = time.time()
+    def worker_loop(worker_id):
+        my_id = INSTANCE_ID * NUM_WORKERS + worker_id
+        gen = url_generator(cidr_pool, my_id, expanded_slots)
+        w_batch = 0
+        w_last_upload = time.time()
+        for batch in gen:
+            w_batch += 1
+            print(f"\n[W{worker_id}] Batch #{w_batch}: {len(batch)} URL → scansione", flush=True)
+            process_urls(batch)
+            print(f"[W{worker_id}] Batch #{w_batch} completato.", flush=True)
+            if time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
+                print(f"[W{worker_id}] Upload log...", flush=True)
+                try:
+                    upload_log_to_bunny()
+                except Exception:
+                    pass
+                w_last_upload = time.time()
+
+    threads = []
+    for w in range(NUM_WORKERS):
+        t = Thread(target=worker_loop, args=(w,), daemon=True)
+        t.start()
+        threads.append(t)
+        time.sleep(0.2)
+
+    print(f"[SYSTEM] Tutti i {NUM_WORKERS} worker avviati. Loop infinito.", flush=True)
+
+    for t in threads:
+        t.join()
 
 if __name__ == '__main__':
     main()
