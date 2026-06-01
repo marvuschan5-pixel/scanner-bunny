@@ -687,6 +687,7 @@ def main():
         container_id = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
         LOG_PATH = os.path.join(LOGS_DIR, f'{container_id}.log')
         sys.stdout = TeeLogger(LOG_PATH)
+        sys.stderr = sys.stdout
 
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
     if LOG_ACTIVE:
@@ -712,14 +713,18 @@ def main():
 
     def worker_loop(worker_id):
         cycle = 0
-        w_last_upload = time.time()
         while True:
             cycle += 1
             gather_and_scan_cycle(cidr_pool, worker_id, NUM_WORKERS, cycle)
             print(f"[W{worker_id}] Ciclo #{cycle} completato.", flush=True)
-            if worker_id == 0 and time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
+
+    def log_upload_loop():
+        while True:
+            time.sleep(LOG_UPLOAD_INTERVAL)
+            try:
                 upload_log_to_bunny()
-                w_last_upload = time.time()
+            except Exception:
+                pass
 
     threads = []
     for w in range(NUM_WORKERS):
@@ -728,7 +733,10 @@ def main():
         threads.append(t)
         time.sleep(0.2)
 
-    print(f"[SYSTEM] Tutti i {NUM_WORKERS} worker avviati. Loop infinito.", flush=True)
+    log_thread = Thread(target=log_upload_loop, daemon=True)
+    log_thread.start()
+
+    print(f"[SYSTEM] Tutti i {NUM_WORKERS} worker + upload log avviati. Loop infinito.", flush=True)
 
     for t in threads:
         t.join()
