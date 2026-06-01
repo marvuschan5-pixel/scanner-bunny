@@ -54,7 +54,7 @@ class TeeLogger:
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
-LOG_UPLOAD_INTERVAL = 300
+LOG_UPLOAD_INTERVAL = 900
 LOG_ACTIVE = True
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
@@ -783,12 +783,8 @@ def main():
             cycle += 1
             gather_and_scan_cycle(cidr_pool, worker_id, NUM_WORKERS, cycle)
             print(f"[W{worker_id}] Ciclo #{cycle} completato.", flush=True)
-            if time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
-                print(f"[W{worker_id}] Upload log...", flush=True)
-                try:
-                    upload_log_to_bunny()
-                except Exception:
-                    pass
+            if worker_id == 0 and time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
+                upload_log_to_bunny()
                 w_last_upload = time.time()
 
     threads = []
