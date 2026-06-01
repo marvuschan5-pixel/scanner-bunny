@@ -271,8 +271,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
     try:
         found_env_urls = []
         found_php_urls = []
-        checked = 0
-        checkeds = 0
         wildcard_strike_count = 0
         fake_for_site = False
         found_for_site = False
@@ -284,7 +282,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
             merdb = grequests.map(reqss)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                    checked += 1
                     try:
                         content = r.content
                         content_lower = content.lower()
@@ -302,7 +299,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         r.close()
                     except: pass
                 if r: r.close()
-            if checked >= 10:
+            if len(found_env_urls) >= 10:
                 fake_for_site = True
             if fake_for_site: break
             
@@ -312,10 +309,9 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
             merdb = grequests.map(reqss)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                    checkeds += 1
                     found_php_urls.append(r.url)
                 if r: r.close()
-            if checkeds >= 10:
+            if len(found_php_urls) >= 10:
                 fake_for_site = True
                 break
             
