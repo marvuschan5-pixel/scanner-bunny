@@ -714,29 +714,20 @@ def build_deterministic_ip_pool(cidrs_with_regions):
           f"~{len(result) // TOTAL_SLOTS:,} per slot", flush=True)
     return result
 
-def verify_ec2_webserver(ip, region):
+def resolve_ec2_url(ip, region):
     try:
         hostname, _, _ = socket.gethostbyaddr(ip)
         hostname = hostname.lower()
-        if "compute.amazonaws.com" not in hostname:
-            return None
-        for port, proto in [(443, "https"), (80, "http")]:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(2)
-                s.connect((hostname, port))
-                s.close()
-                return f"{proto}://{hostname}"
-            except Exception:
-                continue
-        return None
+        if "compute.amazonaws.com" in hostname:
+            return f"http://{hostname}"
     except Exception:
-        return None
+        pass
+    return None
 
 def url_generator(ip_pool, instance_id, total_slots):
     total_for_instance = len(ip_pool) // total_slots
     print(f"[AWS SCAN] Istanza ID={instance_id} (slot 0-{total_slots-1}), "
-          f"~{total_for_instance:,} IP da verificare (loop infinito)", flush=True)
+          f"~{total_for_instance:,} IP da risolvere (loop infinito)", flush=True)
 
     buffer_urls = []
     seen_urls = set()
@@ -746,6 +737,7 @@ def url_generator(ip_pool, instance_id, total_slots):
         cycle += 1
         chunk = []
         processed = 0
+        cycle_hits = 0
 
         for i, (ip, region) in enumerate(ip_pool):
             if i % total_slots != instance_id:
@@ -755,49 +747,52 @@ def url_generator(ip_pool, instance_id, total_slots):
 
             if len(chunk) >= DNS_WORKERS_EC2:
                 with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
-                    futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
+                    futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
                               for ip, region in chunk}
-                    for future in as_completed(futures):
+                    for future in as_completed(futures, timeout=DNS_TIMEOUT_EC2 + 2):
                         try:
-                            url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
+                            url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
                         except Exception:
                             continue
                         if url and url not in seen_urls:
                             seen_urls.add(url)
                             buffer_urls.append(url)
+                            cycle_hits += 1
                 chunk = []
 
                 while len(buffer_urls) >= HOSTNAME_CHUNK:
                     batch = buffer_urls[:HOSTNAME_CHUNK]
                     buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
-                    print(f"[AWS SCAN] Batch pronto: {len(batch)} URL verificati "
-                          f"(ciclo {cycle}, processati {processed:,}/{total_for_instance:,} IP)", flush=True)
+                    print(f"[AWS SCAN] Batch pronto: {len(batch)} URL (ciclo {cycle}, "
+                          f"processati {processed:,}/{total_for_instance:,} IP, "
+                          f"hit {cycle_hits} in questo ciclo)", flush=True)
                     yield batch
 
                 if processed % 5000 == 0:
-                    print(f"[AWS SCAN] Progresso: {processed:,} IP verificati, "
+                    print(f"[AWS SCAN] Progresso: {processed:,} IP risolti, "
                           f"{len(buffer_urls)} URL in buffer", flush=True)
 
         if chunk:
             with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
-                futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
+                futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
                           for ip, region in chunk}
-                for future in as_completed(futures):
+                for future in as_completed(futures, timeout=DNS_TIMEOUT_EC2 + 2):
                     try:
-                        url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
+                        url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
                     except Exception:
                         continue
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         buffer_urls.append(url)
+                        cycle_hits += 1
 
         while len(buffer_urls) >= HOSTNAME_CHUNK:
             batch = buffer_urls[:HOSTNAME_CHUNK]
             buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
             yield batch
 
-        print(f"[AWS SCAN] Ciclo #{cycle} completato. {len(buffer_urls)} URL in buffer, "
-              f"processati {processed:,} IP.", flush=True)
+        print(f"[AWS SCAN] Ciclo #{cycle} completato. {cycle_hits} URL risolti, "
+              f"{len(buffer_urls)} in buffer, processati {processed:,} IP.", flush=True)
 
 def main():
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
