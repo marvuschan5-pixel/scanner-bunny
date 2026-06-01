@@ -739,6 +739,7 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
           f"~{total_for_instance:,} IP da testare via DNS (loop infinito)", flush=True)
 
     buffer_hostnames = []
+    seen_hostnames = set()
     cycle = 0
 
     while True:
@@ -765,7 +766,9 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
                             continue
                         if result is not None:
                             _, hostname, _ = result
-                            buffer_hostnames.append(hostname)
+                            if hostname not in seen_hostnames:
+                                seen_hostnames.add(hostname)
+                                buffer_hostnames.append(hostname)
                 dns_chunk = []
 
                 while len(buffer_hostnames) >= HOSTNAME_CHUNK:
@@ -792,7 +795,9 @@ def instance_hostname_generator(ip_pool, instance_id, total_slots):
                         continue
                     if result is not None:
                         _, hostname, _ = result
-                        buffer_hostnames.append(hostname)
+                        if hostname not in seen_hostnames:
+                            seen_hostnames.add(hostname)
+                            buffer_hostnames.append(hostname)
 
         while len(buffer_hostnames) >= HOSTNAME_CHUNK:
             batch = buffer_hostnames[:HOSTNAME_CHUNK]
