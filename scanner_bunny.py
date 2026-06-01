@@ -55,14 +55,13 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
 LOG_UPLOAD_INTERVAL = 300
-LOG_ACTIVE = True
+LOG_ACTIVE = False
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-HOSTNAME_CHUNK = 50
 MAX_IPS_PER_CIDR = 12000
 
 TOTAL_SLOTS = 2000
@@ -727,91 +726,80 @@ def build_cidr_pool(cidrs_with_regions):
           f"(max {MAX_IPS_PER_CIDR:,} IP/CIDR, sample casuale ogni ciclo)", flush=True)
     return sources
 
-def resolve_ec2_url(ip, region):
+def verify_ec2_webserver(ip, region):
     try:
         hostname, _, _ = socket.gethostbyaddr(ip)
         hostname = hostname.lower()
-        if "compute.amazonaws.com" in hostname:
-            return f"http://{hostname}"
+        if "compute.amazonaws.com" not in hostname:
+            return None
+        for port, proto in [(443, "https"), (80, "http")]:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2)
+                s.connect((hostname, port))
+                s.close()
+                return f"{proto}://{hostname}"
+            except Exception:
+                continue
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
-def url_generator(cidr_pool, instance_id, total_slots):
+def gather_urls_cycle(cidr_pool, instance_id, total_slots, cycle_num):
     total_cidrs = len(cidr_pool)
-    print(f"[AWS SCAN] Istanza ID={instance_id} (slot 0-{total_slots-1}), "
-          f"{total_cidrs} CIDR, IP casuali ogni ciclo (loop infinito)", flush=True)
+    seen_urls = set()
+    all_ips = []
 
-    buffer_urls = []
-    cycle = 0
+    for first, total, region in cidr_pool:
+        n_sample = min(total, MAX_IPS_PER_CIDR)
+        offsets = random.sample(range(total), n_sample) if n_sample < total else list(range(total))
+        for off in offsets:
+            ip_int = first + off
+            if ip_int % total_slots == instance_id:
+                all_ips.append((str(ipaddress.ip_address(ip_int)), region))
 
-    while True:
-        cycle += 1
-        seen_urls = set()
-        all_ips = []
+    random.shuffle(all_ips)
+    print(f"[AWS GATHER #{cycle_num}] {len(all_ips):,} IP campionati. "
+          f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
 
-        for first, total, region in cidr_pool:
-            n_sample = min(total, MAX_IPS_PER_CIDR)
-            offsets = random.sample(range(total), n_sample) if n_sample < total else list(range(total))
-            for off in offsets:
-                ip_int = first + off
-                if ip_int % total_slots == instance_id:
-                    all_ips.append((str(ipaddress.ip_address(ip_int)), region))
+    chunk = []
+    hits = 0
 
-        random.shuffle(all_ips)
-        print(f"[AWS SCAN] Ciclo #{cycle}: {len(all_ips):,} IP campionati da {total_cidrs} CIDR", flush=True)
+    for ip, region in all_ips:
+        chunk.append((ip, region))
 
-        chunk = []
-        processed = 0
-        cycle_hits = 0
-
-        for ip, region in all_ips:
-            chunk.append((ip, region))
-            processed += 1
-
-            if len(chunk) >= DNS_WORKERS_EC2:
-                with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
-                    futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
-                              for ip, region in chunk}
-                    for future in as_completed(futures):
-                        try:
-                            url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
-                        except Exception:
-                            continue
-                        if url and url not in seen_urls:
-                            seen_urls.add(url)
-                            buffer_urls.append(url)
-                            cycle_hits += 1
-                chunk = []
-
-                while len(buffer_urls) >= HOSTNAME_CHUNK:
-                    batch = buffer_urls[:HOSTNAME_CHUNK]
-                    buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
-                    print(f"[AWS SCAN] Batch pronto: {len(batch)} URL (ciclo {cycle}, "
-                          f"processati {processed:,} IP, hit {cycle_hits})", flush=True)
-                    yield batch
-
-        if chunk:
-            with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
-                futures = {executor.submit(resolve_ec2_url, ip, region): (ip, region)
+        if len(chunk) >= DNS_WORKERS_EC2:
+            with ThreadPoolExecutor(max_workers=DNS_WORKERS_EC2) as executor:
+                futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
                           for ip, region in chunk}
                 for future in as_completed(futures):
                     try:
-                        url = future.result(timeout=DNS_TIMEOUT_EC2 + 1)
+                        url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
                     except Exception:
                         continue
                     if url and url not in seen_urls:
                         seen_urls.add(url)
-                        buffer_urls.append(url)
-                        cycle_hits += 1
+                        hits += 1
+            chunk = []
 
-        while len(buffer_urls) >= HOSTNAME_CHUNK:
-            batch = buffer_urls[:HOSTNAME_CHUNK]
-            buffer_urls = buffer_urls[HOSTNAME_CHUNK:]
-            yield batch
+    if chunk:
+        with ThreadPoolExecutor(max_workers=min(DNS_WORKERS_EC2, len(chunk))) as executor:
+            futures = {executor.submit(verify_ec2_webserver, ip, region): (ip, region)
+                      for ip, region in chunk}
+            for future in as_completed(futures):
+                try:
+                    url = future.result(timeout=DNS_TIMEOUT_EC2 + 3)
+                except Exception:
+                    continue
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    hits += 1
 
-        print(f"[AWS SCAN] Ciclo #{cycle} completato. {cycle_hits} URL risolti, "
-              f"{len(buffer_urls)} in buffer, processati {processed:,} IP.", flush=True)
+    urls = list(seen_urls)
+    random.shuffle(urls)
+    print(f"[AWS GATHER #{cycle_num}] Fase 1 completata: {hits} URL web server verificati "
+          f"su {len(all_ips):,} IP analizzati.", flush=True)
+    return urls
 
 def main():
     global LOG_PATH
@@ -842,19 +830,22 @@ def main():
 
     expanded_slots = TOTAL_SLOTS * NUM_WORKERS
     print(f"[SYSTEM] Avvio {NUM_WORKERS} worker thread "
-          f"(slot 0-{expanded_slots-1}, {INSTANCE_ID}×{NUM_WORKERS}=W{INSTANCE_ID*NUM_WORKERS}-W{INSTANCE_ID*NUM_WORKERS+NUM_WORKERS-1})",
+          f"(slot 0-{expanded_slots-1})",
           flush=True)
 
     def worker_loop(worker_id):
         my_id = INSTANCE_ID * NUM_WORKERS + worker_id
-        gen = url_generator(cidr_pool, my_id, expanded_slots)
-        w_batch = 0
+        cycle = 0
         w_last_upload = time.time()
-        for batch in gen:
-            w_batch += 1
-            print(f"\n[W{worker_id}] Batch #{w_batch}: {len(batch)} URL → scansione", flush=True)
-            process_urls(batch)
-            print(f"[W{worker_id}] Batch #{w_batch} completato.", flush=True)
+        while True:
+            cycle += 1
+            urls = gather_urls_cycle(cidr_pool, my_id, expanded_slots, cycle)
+            if urls:
+                print(f"\n[W{worker_id}] Fase 2 — Scansione di {len(urls)} URL verificati...", flush=True)
+                process_urls(urls)
+                print(f"[W{worker_id}] Fase 2 completata. Nuovo ciclo...", flush=True)
+            else:
+                print(f"[W{worker_id}] Nessun URL trovato in questo ciclo.", flush=True)
             if time.time() - w_last_upload > LOG_UPLOAD_INTERVAL:
                 print(f"[W{worker_id}] Upload log...", flush=True)
                 try:
