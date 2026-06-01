@@ -591,7 +591,7 @@ def gather_and_scan_cycle(cidr_pool, worker_id, num_workers, cycle_num):
 
     for first, total, region in cidr_pool:
         n_sample = min(total, MAX_IPS_PER_CIDR)
-        rng = random.Random(first * 7919)
+        rng = random.Random(first + INSTANCE_ID * 7919)
         if n_sample >= total:
             offsets = list(range(total))
             rng.shuffle(offsets)
@@ -608,7 +608,8 @@ def gather_and_scan_cycle(cidr_pool, worker_id, num_workers, cycle_num):
 
     total_pool = len(all_ips)
     if worker_id == 0:
-        print(f"[AWS GATHER #{cycle_num}] {total_pool:,} IP campionati "
+        print(f"[AWS GATHER #{cycle_num}] Container-ID={INSTANCE_ID}, "
+              f"{total_pool:,} IP campionati "
               f"({total_cidrs} CIDR × {MAX_IPS_PER_CIDR}), "
               f"divisi tra {num_workers} worker (~{total_pool // num_workers:,} ciascuno). "
               f"DNS + TCP verify in corso ({DNS_WORKERS_EC2} thread)...", flush=True)
@@ -688,7 +689,8 @@ def main():
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
 
-    print(f"[SYSTEM] Istanza auto-ID={INSTANCE_ID}, {NUM_WORKERS} worker, "
+    print(f"[SYSTEM] Container-ID={INSTANCE_ID} (di {TOTAL_SLOTS} slot), "
+          f"{NUM_WORKERS} worker, "
           f"~{MAX_IPS_PER_CIDR} IP/CIDR — loop infinito", flush=True)
 
     aws_data = fetch_aws_ips()
