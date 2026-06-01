@@ -25,6 +25,27 @@ from itertools import islice
 requests.packages.urllib3.disable_warnings()
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
+class TeeLogger:
+    def __init__(self, filepath):
+        self.terminal = sys.stdout
+        self.logfile = open(filepath, 'a', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.logfile.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.logfile.flush()
+
+    def close(self):
+        self.logfile.close()
+
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+LOG_FILE = None
+LOG_PATH = None
+LOG_UPLOAD_INTERVAL = 300
+
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
@@ -77,6 +98,12 @@ def upload_file_to_bunny(local_path, remote_path, max_retries=3):
         with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
             f.write(f"Error uploading to Bunny Storage ({remote_path}): {last_error}\n")
     return False
+
+def upload_log_to_bunny():
+    if not LOG_PATH or not os.path.exists(LOG_PATH):
+        return
+    remote = f"logs/{os.path.basename(LOG_PATH)}"
+    upload_file_to_bunny(LOG_PATH, remote, max_retries=1)
 
 def load_config():
     try:
@@ -795,7 +822,15 @@ def url_generator(ip_pool, instance_id, total_slots):
               f"{len(buffer_urls)} in buffer, processati {processed:,} IP.", flush=True)
 
 def main():
+    global LOG_PATH
+
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    container_id = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
+    LOG_PATH = os.path.join(LOGS_DIR, f'{container_id}.log')
+    sys.stdout = TeeLogger(LOG_PATH)
+
     print("\n[SYSTEM] 🛡️ Inizializzazione scanner DIABLO in modalità CLOUD WORKER...", flush=True)
+    print(f"[SYSTEM] Log salvato in: {LOG_PATH}", flush=True)
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(newpathtextract, exist_ok=True)
 
@@ -813,11 +848,17 @@ def main():
 
     gen = url_generator(ip_pool, INSTANCE_ID, TOTAL_SLOTS)
     batch_num = 0
+    last_log_upload = time.time()
     for batch in gen:
         batch_num += 1
         print(f"\n[SYSTEM] Batch #{batch_num}: {len(batch)} URL verificati → scansione diretta", flush=True)
         process_urls(batch)
         print(f"[SYSTEM] Batch #{batch_num} completato.", flush=True)
+
+        if time.time() - last_log_upload > LOG_UPLOAD_INTERVAL:
+            print("[SYSTEM] Upload log su Bunny Storage...", flush=True)
+            upload_log_to_bunny()
+            last_log_upload = time.time()
 
 if __name__ == '__main__':
     main()
