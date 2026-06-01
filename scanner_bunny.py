@@ -50,12 +50,12 @@ BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 RANDOM_SEED = 42
-DNS_WORKERS_EC2 = 200
+DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-HOSTNAME_CHUNK = 200
-MAX_IPS_PER_CIDR = 2000
+HOSTNAME_CHUNK = 100
+MAX_IPS_PER_CIDR = 10000
 
-TOTAL_SLOTS = 5000
+TOTAL_SLOTS = 10000
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', str(random.getrandbits(64)))
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
@@ -661,7 +661,7 @@ def process_file(file_path):
                         }
                 if r: r.close()
                 
-            site_pool = Pool(15)
+            site_pool = Pool(50)
             jobs = []
             for site_link, site_payloads in hosts_by_site.items():
                 print(f"  [SCANNER] 🎯 Analisi target attivo: {site_link}", flush=True)
