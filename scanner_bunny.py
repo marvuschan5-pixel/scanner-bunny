@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
 
 from gevent import monkey
-monkey.patch_all()
+monkey.patch_all(thread=False)
 from gevent.pool import Pool
 
 from urllib.parse import urlparse
