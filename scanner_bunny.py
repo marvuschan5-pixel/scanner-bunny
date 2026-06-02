@@ -290,6 +290,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         regex_found = False
         env_batches = site_payloads.get('env', [])
         for batch in env_batches:
+            if fake_for_site or found_for_site or regex_found_one: break
             reqss = [grequests.get(url, stream=True, timeout=5, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
             for r in merdb:
@@ -364,6 +365,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         if found_for_site == False:
             php_batches = site_payloads.get('php', [])
             for batch in php_batches:
+                if fake_for_site or found_for_site or regex_found: break
                 reqss = [grequests.post(url, data={"0x01[]":"legion"}, timeout=5, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe) for url in batch]
                 merdb = grequests.map(reqss)
                 unique_responses = {}
