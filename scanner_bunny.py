@@ -286,6 +286,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         findfile_requests = []
         findfile_requestsunicque = []
         env_batches = site_payloads.get('env', [])
+        regex_found_one = False
         for batch in env_batches:
             reqss = [grequests.get(url, stream=True, timeout=5, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
@@ -295,11 +296,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 if r: r.close()
             if len(findfile_requests) >= 10:
                 fake_for_site = True
-            if fake_for_site or found_for_site: break
+            if fake_for_site or found_for_site or regex_found_one: break
 
 
             if len(findfile_requests) >= 1:
-                regex_found = False
                 for r in findfile_requests:
                     if r is None: continue
                     try:
@@ -330,11 +330,11 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                         for match in re.finditer(regex_pattern, content, re.IGNORECASE):
                             found_for_site = True
-                            regex_found = True
+                            regex_found_one = True
                             break
-                        if regex_found: break
+                        if regex_found_one: break
 
-                    if regex_found:
+                    if regex_found_one:
 
                         print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
                         rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
@@ -478,7 +478,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         try: r.close()
                         except: pass
 
-                        if fake_for_site or found_for_site: break
+                        if fake_for_site or found_for_site or regex_found: break
 
 
         if found_for_site and not is_fallback:
