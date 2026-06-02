@@ -354,7 +354,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     except: pass
 
 
-                if fake_for_site or found_for_site: break
+                if fake_for_site or found_for_site or regex_found_one: break
 
         if fake_for_site: return
 
@@ -475,10 +475,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                 except: pass
 
 
-                        try: r.close()
-                        except: pass
+                            try: r.close()
+                            except: pass
 
-                        if fake_for_site or found_for_site or regex_found: break
+                if fake_for_site or found_for_site or regex_found: break        
 
 
         if found_for_site and not is_fallback:
