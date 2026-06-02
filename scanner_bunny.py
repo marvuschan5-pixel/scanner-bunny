@@ -434,7 +434,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                             if regex_found:
 
                                 print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
-                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                                #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                 saved_file_path = None
                                 remote_subpath = None
