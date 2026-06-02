@@ -54,14 +54,14 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
 LOG_UPLOAD_INTERVAL = 300
-LOG_ACTIVE = True
+LOG_ACTIVE = False
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-MAX_IPS_PER_CIDR = 5
+MAX_IPS_PER_CIDR = 25
 
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 1
