@@ -295,6 +295,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
                     findfile_requests.append(r)
                 if r: r.close()
+                if fake_for_site or found_for_site or regex_found_one: break
             if len(findfile_requests) >= 10:
                 fake_for_site = True
             if fake_for_site or found_for_site or regex_found_one: break
@@ -436,9 +437,6 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                                 print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
                                 #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-
-                                saved_file_path = None
-                                remote_subpath = None
 
                                 try:
                                     html_content = r.text
