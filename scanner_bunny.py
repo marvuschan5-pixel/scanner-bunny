@@ -64,7 +64,7 @@ DNS_TIMEOUT_EC2 = 3
 MAX_IPS_PER_CIDR = 5
 
 TOTAL_SLOTS = 2000
-NUM_WORKERS = 10
+NUM_WORKERS = 1
 
 _CONTAINER_NAME = os.environ.get('HOSTNAME', f'local_{int(time.time())}')
 _SLOT_HASH = int(hashlib.md5(_CONTAINER_NAME.encode()).hexdigest()[:12], 16)
