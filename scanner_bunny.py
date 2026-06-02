@@ -54,7 +54,7 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_FILE = None
 LOG_PATH = None
 LOG_UPLOAD_INTERVAL = random.randint(500, 800)
-LOG_ACTIVE = True
+LOG_ACTIVE = False
 
 BUNNY_STORAGE_URL = "https://storage.bunnycdn.com/hunters"
 BUNNY_API_KEY = "a34bea81-b348-49fb-a28ef869d967-3fe2-43fc"
@@ -303,6 +303,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
             if len(findfile_requests) >= 1:
                 for r in findfile_requests:
+                    rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                     if r is None: continue
                     try:
                         content = content_diablo_resp(r)
@@ -339,7 +340,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     if regex_found_one:
 
                         print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
-                        rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                        
 
                         saved_file_path = None
                         remote_subpath = None
@@ -369,7 +370,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 for r in merdb:
                     if r is not None and r.status_code in [200, 206, requests.codes.ok]:
                         if r.url not in unique_responses:
-
+                            rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                             try:
                                 content = r.content
                                 content_len = len(content)
@@ -436,7 +437,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                             if regex_found:
 
                                 print(f"    [!] 🔥 VULNERABILITA' TROVATA (Regex): {response_url}", flush=True)
-                                #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                                
 
                                 try:
                                     html_content = r.text
@@ -458,7 +459,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                                         formatted_output += f"{clean_key} \t {var_value}\n"
                                             if formatted_output:
                                                 print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                                                #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                                 saved_file_path = None
                                                 remote_subpath = None
