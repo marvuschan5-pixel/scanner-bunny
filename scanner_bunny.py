@@ -161,11 +161,12 @@ def content_diablo_resp(req):
         except: return str(req.text)
     else:
         try:
-            try: return str(req.content.decode('utf-8'))
-            except:
-                try: return str(req.content.encode('utf-8'))
-                except: return str(req.text)
-        except: return str(req.content)
+            return str(req.content.decode('utf-8', errors='ignore'))
+        except Exception:
+            try:
+                return str(req.text)
+            except Exception:
+                return str(req.content)
 
 def get_initial_url(url):
     if url.startswith('http://') or url.startswith('https://'):
@@ -222,7 +223,7 @@ def process_urls(urls_list, is_fallback=False):
             merdb = grequests.map(resp_site)
             hosts_by_site = {}
             for r in merdb:
-                if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
+                if r is not None and r.status_code in [requests.codes.ok, 403, 206]:
                     site_url = r.url
                     if site_url not in hosts_by_site:
                         hosts_by_site[site_url] = {
@@ -233,7 +234,7 @@ def process_urls(urls_list, is_fallback=False):
 
             retry_urls = []
             for i, r in enumerate(merdb):
-                if r is None or (r.status_code not in [requests.codes.ok, 403, 200, 206]):
+                if r is None or (r.status_code not in [requests.codes.ok, 403, 206]):
                     retry_u = get_retry_url(chunk[i])
                     if retry_u:
                         retry_urls.append(retry_u)
@@ -246,7 +247,7 @@ def process_urls(urls_list, is_fallback=False):
             ]
             retry_responses = grequests.map(resp_retry)
             for r in retry_responses:
-                if r is not None and r.status_code in [requests.codes.ok, 403, 200, 206]:
+                if r is not None and r.status_code in [requests.codes.ok, 403, 206]:
                     site_url = r.url
                     if site_url not in hosts_by_site:
                         hosts_by_site[site_url] = {
@@ -292,9 +293,11 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
             reqss = [grequests.get(url, stream=True, timeout=5, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
             for r in merdb:
-                if r is not None and r.status_code in [200, 206, requests.codes.ok]:
+                if r is not None and r.status_code in [200, 206]:
                     findfile_requests.append(r)
-                if r: r.close()
+                else:
+                    try: r.close()
+                    except: pass
                 if fake_for_site or found_for_site or regex_found_one: break
             if len(findfile_requests) >= 10:
                 fake_for_site = True
@@ -308,13 +311,11 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     try:
                         content = content_diablo_resp(r)
                         content_lower = content.lower()
-                        if b'<pre' in content_lower and b'</pre>' in content_lower:
+                        if '<pre' in content_lower and '</pre>' in content_lower:
                             fake_for_site = True
-                            r.close()
                             break
-                        if b"popbox.fun" in content_lower:
+                        if "popbox.fun" in content_lower:
                             fake_for_site = True
-                            r.close()
                             break
                     except:
                         pass
@@ -331,11 +332,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                             end_b = r"\b" if pattern[-1].isalnum() or pattern[-1] == '_' else ""
                             regex_pattern = f"{start_b}{escaped}{end_b}"
 
-                        for match in re.finditer(regex_pattern, content, re.IGNORECASE):
+                        if re.search(regex_pattern, content, re.IGNORECASE):
                             found_for_site = True
                             regex_found_one = True
                             break
-                        if regex_found_one: break
 
                     if regex_found_one:
 
@@ -368,14 +368,14 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                 merdb = grequests.map(reqss)
                 unique_responses = {}
                 for r in merdb:
-                    if r is not None and r.status_code in [200, 206, requests.codes.ok]:
+                    if r is not None and r.status_code in [200, 206]:
                         if r.url not in unique_responses:
-                            rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                             try:
                                 content = r.content
                                 content_len = len(content)
                             except:
-                                pass
+                                r.close()
+                                continue
                             if content_len < 10 or content_len > 1000000:
                                 r.close()
                                 continue
@@ -428,11 +428,10 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                     end_b = r"\b" if pattern[-1].isalnum() or pattern[-1] == '_' else ""
                                     regex_pattern = f"{start_b}{escaped}{end_b}"
 
-                                for match in re.finditer(regex_pattern, contentsx, re.IGNORECASE):
+                                if re.search(regex_pattern, contentsx, re.IGNORECASE):
                                     found_for_site = True
                                     regex_found = True
                                     break
-                                if regex_found: break
 
                             if regex_found:
 
@@ -459,7 +458,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                                                         formatted_output += f"{clean_key} \t {var_value}\n"
                                             if formatted_output:
                                                 print(f"    [!] 🐘 TROVATO PHPINFO: {response_url}", flush=True)
-                                                #rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+                                                rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
                                                 saved_file_path = None
                                                 remote_subpath = None
