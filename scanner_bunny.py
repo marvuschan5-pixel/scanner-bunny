@@ -293,7 +293,16 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
             merdb = grequests.map(reqss)
             for r in merdb:
                 if r is not None and r.status_code in [200, 206, requests.codes.ok]:
+                    findfile_requests.append(r)
+                if r: r.close()
+                if fake_for_site or found_for_site or regex_found_one: break
+            if len(findfile_requests) >= 10:
+                fake_for_site = True
+            if fake_for_site or found_for_site or regex_found_one: break
 
+
+            if len(findfile_requests) >= 1:
+                for r in findfile_requests:
                     rnd_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
                     if r is None: continue
                     try:
@@ -348,6 +357,8 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
 
                     if fake_for_site or found_for_site or regex_found_one: break
+
+        if fake_for_site: return
 
 
         if found_for_site == False:
