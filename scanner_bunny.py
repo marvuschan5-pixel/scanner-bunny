@@ -285,9 +285,9 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
         headers_file_probe['Range'] = 'bytes=0-4096'
         findfile_requests = []
         findfile_requestsunicque = []
-        env_batches = site_payloads.get('env', [])
         regex_found_one = False
         regex_found = False
+        env_batches = site_payloads.get('env', [])
         for batch in env_batches:
             reqss = [grequests.get(url, stream=True, timeout=5, verify=False, allow_redirects=False) for url in batch]
             merdb = grequests.map(reqss)
@@ -354,7 +354,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
                     except: pass
 
 
-                if fake_for_site or found_for_site or regex_found_one: break
+                    if fake_for_site or found_for_site or regex_found_one: break
 
         if fake_for_site: return
 
@@ -408,6 +408,7 @@ def _scan_site(site_link, site_payloads, is_fallback=False):
 
                 valid_responzzz = list(unique_responses.values())
                 if valid_responzzz:
+                    
                     for r in findfile_requestsunicque:
                         if r is None: continue
                         try:
